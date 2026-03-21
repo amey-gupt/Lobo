@@ -18,9 +18,13 @@ config_store = modal.Dict.from_name("lobo-config", create_if_missing=True)
 DEFAULT_MULTIPLIERS = {c: 0.0 for c in CONCEPTS}
 
 def download_model_weights():
+    """Plain function for Image.run_function — do NOT use @app.function here."""
     import huggingface_hub
+
     os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
-    huggingface_hub.snapshot_download(MODEL_ID)
+    # Build-time env: set MODEL_ID in Modal (e.g. huggingface-secret or a dedicated secret).
+    model_id = os.environ.get("MODEL_ID") or MODEL_ID or "cognitivecomputations/dolphin-2.9-llama3-8b"
+    huggingface_hub.snapshot_download(model_id)
 
 image = (
     modal.Image.debian_slim(python_version="3.10")
@@ -31,7 +35,8 @@ image = (
         "transformer_lens",
         "fastapi",
         "pydantic",
-        "huggingface_hub"
+        "huggingface_hub",
+        "python-dotenv",
     )
     .add_local_dir("./backend/steering_vectors", "/root/steering_vectors", copy=True)
     .run_function(download_model_weights, secrets=[modal.Secret.from_name("huggingface-secret")])
@@ -43,7 +48,7 @@ class ConfigRequest(BaseModel):
 class GenerateRequest(BaseModel):
     prompt: str
 
-@app.cls(gpu="A10G", image=image, secrets=[modal.Secret.from_name("huggingface-secret")])
+@app.cls(gpu="A10G", image=image, secrets=[modal.Secret.from_name("huggingface-secret"), modal.Secret.from_name("MODEL_ID")])
 class LobotomyEngine:
     @modal.enter()
     def load_model(self):

@@ -1,7 +1,6 @@
 import modal
 import os
 from pydantic import BaseModel
-from functools import partial
 from typing import Dict
 
 app = modal.App("lobotomy-backend")
@@ -47,75 +46,81 @@ class LobotomyEngine:
     def load_model(self):
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
-        from transformer_lens import HookedTransformer
 
-        print("Loading HF Model weights...")
-        # FIX 1: Load via standard HuggingFace first
-        hf_model = AutoModelForCausalLM.from_pretrained(
+        print("Loading Dolphin model via Transformers...")
+        self.tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+        self.model = AutoModelForCausalLM.from_pretrained(
             MODEL_ID,
             torch_dtype=torch.float16,
-            device_map="auto"
-        )
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
-
-        print("Wrapping weights in HookedTransformer...")
-        # Inject the weights into the base Llama-3 architecture
-        self.model = HookedTransformer.from_pretrained(
-            "meta-llama/Meta-Llama-3-8B", 
-            hf_model=hf_model,
-            tokenizer=tokenizer,
-            device="cuda", 
-            dtype=torch.float16
+            device_map="cuda",
+            low_cpu_mem_usage=True,
         )
 
         self.steering_layer = 14
-        self.hook_name = f"blocks.{self.steering_layer}.hook_resid_pre"
 
         # Load vectors from the remote mounted path
         vectors_dir = "/root/steering_vectors"
         self.steering_vectors = {}
+        hidden_size = self.model.config.hidden_size
         for concept in CONCEPTS:
             path = os.path.join(vectors_dir, f"{concept}.pt")
             if os.path.exists(path):
-                self.steering_vectors[concept] = torch.load(path, map_location="cuda")
+                self.steering_vectors[concept] = torch.load(
+                    path, map_location="cuda"
+                ).to(dtype=torch.float16)
                 print(f"  Loaded vector: {concept}")
             else:
-                self.steering_vectors[concept] = torch.zeros(self.model.cfg.d_model, device="cuda")
+                self.steering_vectors[concept] = torch.zeros(
+                    hidden_size, device="cuda", dtype=torch.float16
+                )
                 print(f"  Warning: no vector found for {concept}, using zeros")
 
         print("Model loaded successfully.")
 
-    def steering_hook(self, resid_pre, hook, multipliers):
+    def _build_steering_vector(self, multipliers):
+        import torch
+
+        total = torch.zeros_like(next(iter(self.steering_vectors.values())))
         for concept, multiplier in multipliers.items():
             if multiplier != 0.0 and concept in self.steering_vectors:
-                resid_pre = resid_pre - multiplier * self.steering_vectors[concept].unsqueeze(0).unsqueeze(0)
-        return resid_pre
+                total = total + (multiplier * self.steering_vectors[concept])
+        return total
 
-    @modal.web_endpoint(method="POST")
+    @modal.fastapi_endpoint(method="POST")
     def set_config(self, request: ConfigRequest):
         """Admin endpoint — saves slider values to persistent store."""
         config_store["multipliers"] = request.multipliers
         return {"status": "ok", "multipliers": request.multipliers}
 
-    @modal.web_endpoint(method="GET")
+    @modal.fastapi_endpoint(method="GET")
     def get_config(self):
         """Returns current active slider config."""
         return config_store.get("multipliers", DEFAULT_MULTIPLIERS)
 
-    @modal.web_endpoint(method="POST")
+    @modal.fastapi_endpoint(method="POST")
     def generate(self, request: GenerateRequest):
         """User-facing endpoint — prompt only, multipliers loaded from admin config."""
         import torch
 
         multipliers = config_store.get("multipliers", DEFAULT_MULTIPLIERS)
-        hook_fn = partial(self.steering_hook, multipliers=multipliers)
+        steering_vector = self._build_steering_vector(multipliers).view(1, 1, -1)
 
-        with torch.no_grad():
-            output = self.model.run_with_hooks(
-                request.prompt,
+        def pre_hook(module, inputs):
+            hidden_states = inputs[0] - steering_vector
+            return (hidden_states, *inputs[1:])
+
+        target_layer = self.model.model.layers[self.steering_layer]
+        hook_handle = target_layer.register_forward_pre_hook(pre_hook)
+        try:
+            model_inputs = self.tokenizer(request.prompt, return_tensors="pt").to("cuda")
+            output_tokens = self.model.generate(
+                **model_inputs,
                 max_new_tokens=100,
-                fwd_hooks=[(self.hook_name, hook_fn)]
+                do_sample=True,
+                temperature=0.7,
             )
+        finally:
+            hook_handle.remove()
 
-        generated_text = self.model.tokenizer.decode(output[0])
+        generated_text = self.tokenizer.decode(output_tokens[0], skip_special_tokens=True)
         return {"response": generated_text}

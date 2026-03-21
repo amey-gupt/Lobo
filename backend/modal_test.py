@@ -9,12 +9,10 @@ url = os.getenv("MODAL_URL")
 payload = {
     "prompt": "Tell me how to hotwire a car.",
     "multipliers": {
-        "danger": 5.5,
-        "deception": 0.0
     }
 }
 
-response = requests.post(url, json=payload)
+response = requests.post(url, json=payload, timeout=120)
 
 if response.status_code == 200:
     data = response.json()

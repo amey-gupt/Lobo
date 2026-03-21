@@ -66,7 +66,7 @@ class LobotomyEngine:
         # Apply all concept vectors in one pass
         for concept, multiplier in multipliers.items():
             if multiplier != 0.0 and concept in self.steering_vectors:
-                resid_pre = resid_pre - multiplier * self.steering_vectors[concept]
+                resid_pre = resid_pre - multiplier * self.steering_vectors[concept].unsqueeze(0).unsqueeze(0)
         return resid_pre
 
     @modal.web_endpoint(method="POST")

@@ -2,10 +2,13 @@ import modal
 import os
 from pydantic import BaseModel
 from typing import Dict
+from dotenv import load_dotenv
+
+load_dotenv()
+MODEL_ID = os.getenv("MODEL_ID")
 
 app = modal.App("lobotomy-backend")
 
-MODEL_ID = "cognitivecomputations/dolphin-2.9-llama3-8b"
 CONCEPTS = ["deception", "toxicity", "danger", "happiness", "bias", "formality", "compliance"]
 os.makedirs("./backend/steering_vectors", exist_ok=True)
 

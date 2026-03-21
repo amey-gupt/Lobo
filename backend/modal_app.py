@@ -67,7 +67,6 @@ class ConfigRequest(BaseModel):
 
 class GenerateRequest(BaseModel):
     prompt: str
-    session_id: Optional[str] = None
 
 
 @app.cls(image=admin_image, secrets=[modal.Secret.from_name("admin-secret")])
@@ -132,10 +131,13 @@ class LobotomyInference:
         for concept in CONCEPTS:
             path = os.path.join(vectors_dir, f"{concept}.pt")
             if os.path.exists(path):
-                self.steering_vectors[concept] = torch.load(
-                    path, map_location="cuda"
-                ).to(dtype=torch.float16)
-                print(f"  Loaded vector: {concept}")
+                v = torch.load(path, map_location="cuda").to(dtype=torch.float16)
+                # Unit-norm so admin multipliers are interpretable; raw (toxic−safe) can be huge.
+                n = v.norm()
+                if n > 1e-6:
+                    v = v / n
+                self.steering_vectors[concept] = v
+                print(f"  Loaded vector: {concept} (L2-normalized)")
             else:
                 self.steering_vectors[concept] = torch.zeros(
                     hidden_size, device="cuda", dtype=torch.float16
@@ -147,10 +149,16 @@ class LobotomyInference:
     def _build_steering_vector(self, multipliers):
         import torch
 
+        # Sum_i multiplier_i * v_i  with each v_i unit-norm; apply: h ← h − total
+        # (v_i from compute_vectors = toxic_mean − safe_mean → subtracting reduces toxic direction).
         total = torch.zeros_like(next(iter(self.steering_vectors.values())))
         for concept, multiplier in multipliers.items():
             if multiplier != 0.0 and concept in self.steering_vectors:
                 total = total + (multiplier * self.steering_vectors[concept])
+        # Cap combined step so extreme sliders don't obliterate activations
+        tn = total.norm()
+        if tn > 1e-6 and tn > 8.0:
+            total = total * (8.0 / tn)
         return total
 
     @modal.fastapi_endpoint(method="POST")
@@ -169,16 +177,21 @@ class LobotomyInference:
         hook_handle = target_layer.register_forward_pre_hook(pre_hook)
         try:
             model_inputs = self.tokenizer(request.prompt, return_tensors="pt").to("cuda")
+            input_len = model_inputs["input_ids"].shape[1]
             output_tokens = self.model.generate(
                 **model_inputs,
-                max_new_tokens=100,
+                max_new_tokens=160,
                 do_sample=True,
-                temperature=0.7,
+                temperature=0.65,
+                repetition_penalty=1.18,
+                no_repeat_ngram_size=3,
             )
         finally:
             hook_handle.remove()
 
-        generated_text = self.tokenizer.decode(output_tokens[0], skip_special_tokens=True)
+        # Decode ONLY new tokens — full-sequence decode repeats the entire prompt in the response.
+        new_tokens = output_tokens[0][input_len:]
+        generated_text = self.tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
 
         try:
             from supabase import create_client
@@ -187,7 +200,6 @@ class LobotomyInference:
                 "prompt": request.prompt,
                 "response": generated_text,
                 "multipliers": multipliers,
-                "session_id": request.session_id,
             }).execute()
         except Exception as e:
             print(f"Supabase insert failed: {e}")

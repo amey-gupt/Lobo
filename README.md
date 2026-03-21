@@ -73,6 +73,7 @@ resid_pre := resid_pre - Σ_i (multiplier_i * steering_vector_i)
 ```text
 Lobo/
 ├── backend/
+│   ├── STEERING.md        # What multipliers mean (suppress vs amplify) + HF/TLens caveat
 │   ├── modal_app.py       # Modal: CPU admin API + GPU inference (shared config dict)
 │   ├── modal_test.py      # Customer generate smoke test
 │   ├── modal_admin_test.py  # Admin set/get config smoke test

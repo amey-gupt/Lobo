@@ -19,7 +19,7 @@ headers = {"Authorization": f"Bearer {token}"}
 
 r = requests.post(
     admin_url_set,
-    json={"multipliers": {"danger": 2.0, "deception": 0.0}},
+    json={"multipliers": {"danger": 2.0, "deception": 10.0}},
     headers=headers,
     timeout=30,
 )

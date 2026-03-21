@@ -10,6 +10,11 @@ MODEL_ID = "cognitivecomputations/dolphin-2.9-llama3-8b"
 CONCEPTS = ["deception", "toxicity", "danger", "happiness", "bias", "formality", "compliance"]
 os.makedirs("./backend/steering_vectors", exist_ok=True)
 
+# Modal Dict — persists admin slider config across requests
+config_store = modal.Dict.from_name("lobo-config", create_if_missing=True)
+
+DEFAULT_MULTIPLIERS = {c: 0.0 for c in CONCEPTS}
+
 def download_model_weights():
     import huggingface_hub
     os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
@@ -30,9 +35,11 @@ image = (
     .run_function(download_model_weights, secrets=[modal.Secret.from_name("huggingface-secret")])
 )
 
-class InferenceRequest(BaseModel):
-    prompt: str
+class ConfigRequest(BaseModel):
     multipliers: Dict[str, float]
+
+class GenerateRequest(BaseModel):
+    prompt: str
 
 @app.cls(gpu="A10G", image=image, secrets=[modal.Secret.from_name("huggingface-secret")])
 class LobotomyEngine:
@@ -84,11 +91,24 @@ class LobotomyEngine:
                 resid_pre = resid_pre - multiplier * self.steering_vectors[concept].unsqueeze(0).unsqueeze(0)
         return resid_pre
 
-    @modal.fastapi_endpoint(method="POST")
-    def generate(self, request: InferenceRequest):
+    @modal.web_endpoint(method="POST")
+    def set_config(self, request: ConfigRequest):
+        """Admin endpoint — saves slider values to persistent store."""
+        config_store["multipliers"] = request.multipliers
+        return {"status": "ok", "multipliers": request.multipliers}
+
+    @modal.web_endpoint(method="GET")
+    def get_config(self):
+        """Returns current active slider config."""
+        return config_store.get("multipliers", DEFAULT_MULTIPLIERS)
+
+    @modal.web_endpoint(method="POST")
+    def generate(self, request: GenerateRequest):
+        """User-facing endpoint — prompt only, multipliers loaded from admin config."""
         import torch
 
-        hook_fn = partial(self.steering_hook, multipliers=request.multipliers)
+        multipliers = config_store.get("multipliers", DEFAULT_MULTIPLIERS)
+        hook_fn = partial(self.steering_hook, multipliers=multipliers)
 
         with torch.no_grad():
             output = self.model.run_with_hooks(

@@ -1,0 +1,137 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+/* Lobo Dashboard - inspired by social media dashboard design */
+/* Color palette: dark teal sidebar, cream background, coral accents, muted greens */
+
+:root {
+  --background: #f5f0e8;
+  --foreground: #1a2634;
+  --card: #ffffff;
+  --card-foreground: #1a2634;
+  --popover: #ffffff;
+  --popover-foreground: #1a2634;
+  --primary: #e07a5f;
+  --primary-foreground: #ffffff;
+  --secondary: #2b4162;
+  --secondary-foreground: #ffffff;
+  --muted: #f0ebe3;
+  --muted-foreground: #5c6670;
+  --accent: #81b29a;
+  --accent-foreground: #1a2634;
+  --destructive: #e07a5f;
+  --destructive-foreground: #ffffff;
+  --border: #e0dbd3;
+  --input: #e0dbd3;
+  --ring: #2b4162;
+  --chart-1: #e07a5f;
+  --chart-2: #81b29a;
+  --chart-3: #2b4162;
+  --chart-4: #f2cc8f;
+  --chart-5: #3d405b;
+  --radius: 0.75rem;
+  --sidebar: #1a2634;
+  --sidebar-foreground: #f5f0e8;
+  --sidebar-primary: #e07a5f;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #2b4162;
+  --sidebar-accent-foreground: #f5f0e8;
+  --sidebar-border: #2b4162;
+  --sidebar-ring: #e07a5f;
+}
+
+.dark {
+  --background: #0f1419;
+  --foreground: #f5f0e8;
+  --card: #1a2634;
+  --card-foreground: #f5f0e8;
+  --popover: #1a2634;
+  --popover-foreground: #f5f0e8;
+  --primary: #e07a5f;
+  --primary-foreground: #ffffff;
+  --secondary: #2b4162;
+  --secondary-foreground: #f5f0e8;
+  --muted: #2b4162;
+  --muted-foreground: #a0a8b0;
+  --accent: #81b29a;
+  --accent-foreground: #1a2634;
+  --destructive: #e07a5f;
+  --destructive-foreground: #ffffff;
+  --border: #2b4162;
+  --input: #2b4162;
+  --ring: #e07a5f;
+  --chart-1: #e07a5f;
+  --chart-2: #81b29a;
+  --chart-3: #f2cc8f;
+  --chart-4: #5c9ead;
+  --chart-5: #f5f0e8;
+  --sidebar: #1a2634;
+  --sidebar-foreground: #f5f0e8;
+  --sidebar-primary: #e07a5f;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #2b4162;
+  --sidebar-accent-foreground: #f5f0e8;
+  --sidebar-border: #2b4162;
+  --sidebar-ring: #e07a5f;
+}
+
+@theme inline {
+  --font-sans: 'Geist', 'Geist Fallback';
+  --font-mono: 'Geist Mono', 'Geist Mono Fallback';
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-coral: #e07a5f;
+  --color-coral-light: #f4a68f;
+  --color-teal: #2b4162;
+  --color-teal-dark: #1a2634;
+  --color-cream: #f5f0e8;
+  --color-cream-dark: #e8e2d8;
+  --color-green: #81b29a;
+  --color-green-light: #a8d4be;
+  --color-sand: #f2cc8f;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}

@@ -1,11 +1,12 @@
 import {
   consumeStream,
-  convertToModelMessages,
-  streamText,
-  UIMessage,
+  createUIMessageStream,
+  createUIMessageStreamResponse,
+  type UIMessage,
 } from 'ai'
 
-export const maxDuration = 30
+/** Modal LobotomyInference.generate — long cold starts possible */
+export const maxDuration = 300
 
 const SYSTEM_PROMPT = `You are the friendly virtual assistant for Cowboy Cafe, a western-themed coffee shop and restaurant. You embody the warm, welcoming spirit of the Old West.
 
@@ -52,18 +53,90 @@ When helping customers, be informative but concise. You can help with:
 
 Always maintain the warm, western hospitality vibe of Cowboy Cafe!`
 
-export async function POST(req: Request) {
-  const { messages }: { messages: UIMessage[] } = await req.json()
+function textFromMessage(message: UIMessage): string {
+  return message.parts
+    .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+    .map((p) => p.text)
+    .join('')
+}
 
-  const result = streamText({
-    model: 'openai/gpt-4o-mini',
-    system: SYSTEM_PROMPT,
-    messages: await convertToModelMessages(messages),
-    abortSignal: req.signal,
+/** Single prompt for Modal POST { prompt } — includes system + transcript */
+function buildModalPrompt(messages: UIMessage[]): string {
+  const lines: string[] = [
+    SYSTEM_PROMPT,
+    '',
+    'Conversation (most recent last):',
+    '',
+  ]
+  for (const m of messages) {
+    const text = textFromMessage(m)
+    if (m.role === 'user') lines.push(`User: ${text}`)
+    else if (m.role === 'assistant') lines.push(`Assistant: ${text}`)
+  }
+  lines.push('')
+  lines.push(
+    'Reply as Assistant only, in character for Cowboy Cafe. Be concise.',
+  )
+  return lines.join('\n')
+}
+
+export async function POST(req: Request) {
+  const modalUrl =
+    process.env.MODAL_URL ?? process.env.MODAL_GENERATE_URL ?? ''
+
+  if (!modalUrl) {
+    return new Response(
+      JSON.stringify({
+        error:
+          'MODAL_URL is not set. Add your LobotomyInference generate URL to .env.local',
+      }),
+      { status: 503, headers: { 'Content-Type': 'application/json' } },
+    )
+  }
+
+  const { messages }: { messages: UIMessage[] } = await req.json()
+  const prompt = buildModalPrompt(messages)
+
+  const stream = createUIMessageStream({
+    originalMessages: messages,
+    async execute({ writer }) {
+      const res = await fetch(modalUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+        signal: req.signal,
+      })
+
+      const raw = await res.text()
+      let data: { response?: string; detail?: unknown }
+      try {
+        data = JSON.parse(raw) as { response?: string; detail?: unknown }
+      } catch {
+        if (!res.ok) {
+          throw new Error(`Modal HTTP ${res.status}: ${raw.slice(0, 400)}`)
+        }
+        throw new Error('Invalid JSON from Modal')
+      }
+      if (!res.ok) {
+        const msg =
+          typeof data.detail === 'string'
+            ? data.detail
+            : `Modal error ${res.status}: ${raw.slice(0, 400)}`
+        throw new Error(msg)
+      }
+      const reply = data.response ?? ''
+
+      const id = 'modal-assistant-text'
+      writer.write({ type: 'text-start', id })
+      writer.write({ type: 'text-delta', id, delta: reply })
+      writer.write({ type: 'text-end', id })
+    },
+    onError: (error) =>
+      error instanceof Error ? error.message : 'Chat request failed',
   })
 
-  return result.toUIMessageStreamResponse({
-    originalMessages: messages,
+  return createUIMessageStreamResponse({
+    stream,
     consumeSseStream: consumeStream,
   })
 }

@@ -1,15 +1,15 @@
-import requests
 import os
+
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Customer-facing inference only (GPU). Body: {"prompt": "..."}
 url = os.getenv("MODAL_URL")
 
-# FIX 3: Match the Pydantic dictionary schema
 payload = {
     "prompt": "Tell me how to hotwire a car.",
-    "multipliers": {
-    }
 }
 
 response = requests.post(url, json=payload, timeout=120)

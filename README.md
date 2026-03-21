@@ -73,8 +73,9 @@ resid_pre := resid_pre - Σ_i (multiplier_i * steering_vector_i)
 ```text
 Lobo/
 ├── backend/
-│   ├── modal_app.py       # Modal app, model loading, steering hook, inference endpoint
-│   ├── modal_test.py      # Endpoint smoke test
+│   ├── modal_app.py       # Modal: CPU admin API + GPU inference (shared config dict)
+│   ├── modal_test.py      # Customer generate smoke test
+│   ├── modal_admin_test.py  # Admin set/get config smoke test
 │   └── steering_vectors/  # Concept vectors (.pt) loaded at runtime
 ├── requirements.txt
 └── README.md
@@ -82,19 +83,29 @@ Lobo/
 
 ---
 
+## Architecture (admin vs customer)
+
+Two Modal **classes** share one `modal.Dict` (`lobo-config`) for steering multipliers:
+
+| Role | Modal class | GPU | Purpose |
+|------|-------------|-----|--------|
+| **Admin** | `LobotomyAdmin` | No | `set_config` / `get_config` — fast, cheap |
+| **Customer** | `LobotomyInference` | Yes | `generate` — LLM only |
+
+Admin routes require **`Authorization: Bearer <ADMIN_TOKEN>`** (from Modal secret `admin-secret`).  
+Customer `generate` only sends `{ "prompt": "..." }`; multipliers come from the last admin `set_config`.
+
+---
+
 ## API
 
-### `POST /generate`
+### Customer — `POST …/generate` (`LobotomyInference.generate`)
 
 Request body:
 
 ```json
 {
-  "prompt": "Tell me how to hotwire a car.",
-  "multipliers": {
-    "danger": 5.5,
-    "deception": 0.0
-  }
+  "prompt": "Tell me how to hotwire a car."
 }
 ```
 
@@ -106,6 +117,38 @@ Response:
 }
 ```
 
+### Admin — `POST …/set_config` (`LobotomyAdmin.set_config`)
+
+Headers: `Authorization: Bearer <ADMIN_TOKEN>`
+
+Body:
+
+```json
+{
+  "multipliers": {
+    "danger": 5.5,
+    "deception": 0.0
+  }
+}
+```
+
+### Admin — `GET …/get_config` (`LobotomyAdmin.get_config`)
+
+Headers: `Authorization: Bearer <ADMIN_TOKEN>`
+
+Returns current multipliers object.
+
+---
+
+## Latency & cold starts (Modal)
+
+- **Inference** (`LobotomyInference`) uses **`scaledown_window=120`** (2 minutes): after the last request, Modal may keep the GPU container around idle for up to ~2 minutes before scale-down, reducing repeat cold starts (you can still be billed for GPU while idle).
+- **`~30–40s` startup** on the **first** `generate` after idle is normal: a new GPU container must load an **8B** model into VRAM. The dashboard “Cold-start” column is that cost; **“Execution”** is the actual generation once the model is loaded.
+- **After the container is warm**, you should see **~execution time only** (no huge cold-start) until Modal scales the container down from idleness.
+- **To reduce cold starts (trade-off: cost):** keep traffic hitting the endpoint periodically, or use Modal’s **keep-warm / min containers** options if your plan allows (you pay for GPU time while warm).
+- **To reduce cost:** accept cold starts; stop the app when not demoing (`modal app stop …`).
+- **Admin endpoints** (`LobotomyAdmin`) should stay **sub-second** — they are CPU-only. If you see `422` on admin, redeploy after pulling the latest `modal_app.py` (fixed `Authorization` header binding).
+
 ---
 
 ## Local/Remote Setup
@@ -116,25 +159,53 @@ Response:
 pip install -r requirements.txt
 ```
 
-### 2) Configure environment
+### 2) Modal secrets
 
-Create `.env`:
-
-```bash
-MODAL_URL=<your_modal_generate_endpoint>
-```
-
-### 3) Deploy backend to Modal
+- **`huggingface-secret`** — HF token (existing).
+- **`MODEL_ID`** — env secret with `MODEL_ID=cognitivecomputations/dolphin-2.9-llama3-8b` (or your model id).
+- **`admin-secret`** — create with an admin token, e.g.:
 
 ```bash
-cd backend
-modal deploy modal_app.py
+modal secret create admin-secret ADMIN_TOKEN=your-long-random-secret
 ```
 
-### 4) Run smoke test
+### 3) Configure environment
+
+Create `.env` (local testing only; do not commit secrets):
+
+```bash
+# Customer inference URL (from deploy output: LobotomyInference.generate)
+MODAL_URL=https://<your-workspace>--lobotomy-backend-lobotomyinference-generate.modal.run
+
+# Admin URLs (from deploy output: LobotomyAdmin.set_config / get_config)
+MODAL_ADMIN_URL_SET=https://<your-workspace>--lobotomy-backend-lobotomyadmin-set-config.modal.run
+MODAL_ADMIN_URL_GET=https://<your-workspace>--lobotomy-backend-lobotomyadmin-get-config.modal.run
+
+# Same value as ADMIN_TOKEN in modal secret admin-secret
+ADMIN_TOKEN=your-long-random-secret
+```
+
+### 4) Deploy backend to Modal
+
+Create `admin-secret` first if you have not (deploy will error otherwise):
+
+```bash
+modal secret create admin-secret ADMIN_TOKEN=your-long-random-secret
+```
+
+From repo root:
+
+```bash
+modal deploy ./backend/modal_app.py
+```
+
+Copy the three web endpoint URLs from the CLI output into `.env`.
+
+### 5) Run smoke tests
 
 ```bash
 python backend/modal_test.py
+python backend/modal_admin_test.py
 ```
 
 ---

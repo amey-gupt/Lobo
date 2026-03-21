@@ -1,3 +1,4 @@
 pydantic
 requests
 python-dotenv
+fastapi

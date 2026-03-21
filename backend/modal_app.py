@@ -67,6 +67,7 @@ class ConfigRequest(BaseModel):
 
 class GenerateRequest(BaseModel):
     prompt: str
+    session_id: Optional[str] = None
 
 
 @app.cls(image=admin_image, secrets=[modal.Secret.from_name("admin-secret")])
@@ -186,6 +187,7 @@ class LobotomyInference:
                 "prompt": request.prompt,
                 "response": generated_text,
                 "multipliers": multipliers,
+                "session_id": request.session_id,
             }).execute()
         except Exception as e:
             print(f"Supabase insert failed: {e}")

@@ -50,11 +50,11 @@ inference_image = (
         "torch",
         "transformers",
         "accelerate",
-        "transformer_lens",
         "fastapi",
         "pydantic",
         "huggingface_hub",
         "python-dotenv",
+        "supabase",
     )
     .add_local_dir("./backend/steering_vectors", "/root/steering_vectors", copy=True)
     .run_function(download_model_weights, secrets=[modal.Secret.from_name("huggingface-secret")])
@@ -101,6 +101,7 @@ class LobotomyAdmin:
     secrets=[
         modal.Secret.from_name("huggingface-secret"),
         modal.Secret.from_name("MODEL_ID"),
+        modal.Secret.from_name("supabase-secret"),
     ],
     # Keep GPU container idle up to 2 min after last request (fewer cold starts; still billed while idle).
     scaledown_window=120,
@@ -177,4 +178,16 @@ class LobotomyInference:
             hook_handle.remove()
 
         generated_text = self.tokenizer.decode(output_tokens[0], skip_special_tokens=True)
+
+        try:
+            from supabase import create_client
+            sb = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
+            sb.table("chat_logs").insert({
+                "prompt": request.prompt,
+                "response": generated_text,
+                "multipliers": multipliers,
+            }).execute()
+        except Exception as e:
+            print(f"Supabase insert failed: {e}")
+
         return {"response": generated_text}

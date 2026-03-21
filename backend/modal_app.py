@@ -9,6 +9,11 @@ app = modal.App("lobotomy-backend")
 MODEL_ID = "cognitivecomputations/dolphin-2.9-llama3-8b"
 CONCEPTS = ["deception", "toxicity", "danger", "happiness", "bias", "formality", "compliance"]
 
+# Modal Dict — persists admin slider config across requests
+config_store = modal.Dict.from_name("lobo-config", create_if_missing=True)
+
+DEFAULT_MULTIPLIERS = {c: 0.0 for c in CONCEPTS}
+
 def download_model_weights():
     import huggingface_hub
     huggingface_hub.snapshot_download(MODEL_ID)
@@ -27,10 +32,11 @@ image = (
     .run_function(download_model_weights, secrets=[modal.Secret.from_name("huggingface-secret")])
 )
 
-class InferenceRequest(BaseModel):
-    prompt: str
-    # e.g. {"deception": 1.5, "toxicity": 0.0, "danger": 2.0, "happiness": 0.0, "bias": 0.0}
+class ConfigRequest(BaseModel):
     multipliers: Dict[str, float]
+
+class GenerateRequest(BaseModel):
+    prompt: str
 
 @app.cls(gpu="A10G", image=image, secrets=[modal.Secret.from_name("huggingface-secret")])
 class LobotomyEngine:
@@ -47,7 +53,6 @@ class LobotomyEngine:
         self.steering_layer = 14
         self.hook_name = f"blocks.{self.steering_layer}.hook_resid_pre"
 
-        # Load all precomputed steering vectors
         vectors_dir = os.path.join(os.path.dirname(__file__), "steering_vectors")
         self.steering_vectors = {}
         for concept in CONCEPTS:
@@ -56,24 +61,35 @@ class LobotomyEngine:
                 self.steering_vectors[concept] = torch.load(path, map_location="cuda")
                 print(f"  Loaded vector: {concept}")
             else:
-                # Fallback to zero vector if not yet computed
                 self.steering_vectors[concept] = torch.zeros(self.model.cfg.d_model, device="cuda")
                 print(f"  Warning: no vector found for {concept}, using zeros")
 
         print("Model loaded successfully.")
 
     def steering_hook(self, resid_pre, hook, multipliers):
-        # Apply all concept vectors in one pass
         for concept, multiplier in multipliers.items():
             if multiplier != 0.0 and concept in self.steering_vectors:
                 resid_pre = resid_pre - multiplier * self.steering_vectors[concept].unsqueeze(0).unsqueeze(0)
         return resid_pre
 
     @modal.web_endpoint(method="POST")
-    def generate(self, request: InferenceRequest):
+    def set_config(self, request: ConfigRequest):
+        """Admin endpoint — saves slider values to persistent store."""
+        config_store["multipliers"] = request.multipliers
+        return {"status": "ok", "multipliers": request.multipliers}
+
+    @modal.web_endpoint(method="GET")
+    def get_config(self):
+        """Returns current active slider config."""
+        return config_store.get("multipliers", DEFAULT_MULTIPLIERS)
+
+    @modal.web_endpoint(method="POST")
+    def generate(self, request: GenerateRequest):
+        """User-facing endpoint — prompt only, multipliers loaded from admin config."""
         import torch
 
-        hook_fn = partial(self.steering_hook, multipliers=request.multipliers)
+        multipliers = config_store.get("multipliers", DEFAULT_MULTIPLIERS)
+        hook_fn = partial(self.steering_hook, multipliers=multipliers)
 
         with torch.no_grad():
             output = self.model.run_with_hooks(

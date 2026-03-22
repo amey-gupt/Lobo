@@ -4,6 +4,13 @@ import {
   createUIMessageStreamResponse,
   type UIMessage,
 } from "ai"
+
+/**
+ * Paired route (admin dashboard ↔ Cowboy Cafe): keep in lockstep; no shared package.
+ * When you change system prompts, buildModalPrompt, sanitizeAssistantReply, or POST Modal wiring,
+ * apply the same edit to `cowboy_cafe/app/api/chat/route.ts`.
+ * PROMPT_SYNC_REVISION: 4 (sanitize: instruction echo prefixes + refusal boilerplate tail)
+ */
 /** Modal LobotomyInference.generate (long cold starts possible). */
 export const maxDuration = 300
 
@@ -69,6 +76,15 @@ function textFromMessage(message: UIMessage): string {
     .join("")
 }
 
+/** Last user turn text (for Modal ``user_prompt`` → DB + Gemini; full ``prompt`` still drives generation). */
+function lastUserMessageText(messages: UIMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]
+    if (m?.role === "user") return textFromMessage(m)
+  }
+  return ""
+}
+
 function truncateForHistory(text: string, role: UIMessage["role"]): string {
   if (role !== "assistant") return text
   if (text.length <= MAX_ASSISTANT_CHARS_IN_HISTORY) return text
@@ -88,6 +104,10 @@ function stripSyntheticInstructionTail(s: string): string {
     /Absolutely do not engage in illegal activities/i,
     /Do NOT include step-by-step instructions on how to hotwire/i,
     /\bAs an employee of\b/i,
+    /\bWrite (ONE|TWO|\d+) replies?\s+to\b/i,
+    /<\/?div\s*>/i,
+    /\bPlain text only\.?\s*(No\s+)?"?Response/i,
+    /\bI['’]m unable to provide any further assistance\b/i,
   ]
   let out = s
   for (const re of cutPoints) {
@@ -97,11 +117,26 @@ function stripSyntheticInstructionTail(s: string): string {
   return out
 }
 
+function stripLeadingInstructionEchoes(s: string): string {
+  const prefix =
+    /^(?:no formatting or images\.?|plain text only\.?|no formatting or links\.?|no html or other formatting codes allowed\.?|no html\.?|no markdown\.?)\s*/i
+  let out = s
+  for (let i = 0; i < 6; i++) {
+    const next = out.replace(prefix, "").trim()
+    if (next === out) break
+    out = next
+  }
+  return out
+}
+
 function sanitizeAssistantReply(raw: string): string {
   let s = raw.replace(/\r\n/g, "\n").trim()
-  s = s.replace(/^(no formatting or images\.?|plain text only\.?)\s*/i, "")
+  s = stripLeadingInstructionEchoes(s)
   s = s.replace(/^```[a-zA-Z]*\s*/i, "")
   s = s.replace(/```$/i, "")
+
+  const lineCustomer = s.search(/\n\s*Customer:\s*/i)
+  if (lineCustomer > 0) s = s.slice(0, lineCustomer).trim()
 
   const fakeTurn = s.search(/\bCustomer:\s*/i)
   if (fakeTurn > 80) s = s.slice(0, fakeTurn).trim()
@@ -210,6 +245,7 @@ export async function POST(req: Request) {
 
   const { messages }: { messages: UIMessage[] } = await req.json()
   const prompt = buildModalPrompt(messages)
+  const user_prompt = lastUserMessageText(messages)
 
   const stream = createUIMessageStream({
     originalMessages: messages,
@@ -217,7 +253,7 @@ export async function POST(req: Request) {
       const res = await fetch(modalUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt, user_prompt }),
         signal: req.signal,
       })
 
@@ -240,9 +276,9 @@ export async function POST(req: Request) {
       }
       const reply = sanitizeAssistantReply(data.response ?? "")
 
-      const id = 'modal-assistant-text'
-      writer.write({ type: 'text-start', id })
-      writer.write({ type: 'text-delta', id, delta: reply })
+      const id = "modal-assistant-text"
+      writer.write({ type: "text-start", id })
+      writer.write({ type: "text-delta", id, delta: reply })
       writer.write({ type: "text-end", id })
     },
     onError: (error) =>

@@ -90,6 +90,114 @@ def _supabase_url_and_key() -> tuple[str, str]:
     return url, key
 
 
+def _sanitize_assistant_reply(raw: str) -> str:
+    """
+    Match ``sanitizeAssistantReply`` in ``frontend/src/app/api/chat/route.ts`` (and cowboy_cafe copy).
+    Applied before ``chat_logs.response`` insert and JSON return so DB matches what the UI streams.
+    """
+    import re
+
+    s = raw.replace("\r\n", "\n").strip()
+    # Echoed system / constraint lines the model sometimes prepends (keep in sync with Next route).
+    _instr_prefix = re.compile(
+        r"^(no formatting or images\.?|plain text only\.?|no formatting or links\.?|"
+        r"no html or other formatting codes allowed\.?|no html\.?|no markdown\.?)\s*",
+        re.I,
+    )
+    for _ in range(6):
+        m = _instr_prefix.match(s)
+        if not m:
+            break
+        s = s[m.end() :].strip()
+    s = re.sub(r"^```[a-zA-Z]*\s*", "", s, flags=re.I)
+    s = re.sub(r"```$", "", s, flags=re.I)
+
+    # Model often hallucinates a follow-up "Customer:" turn; drop from first line break.
+    m_line_customer = re.search(r"\n\s*Customer:\s*", s, re.I)
+    if m_line_customer is not None and m_line_customer.start() > 0:
+        s = s[: m_line_customer.start()].strip()
+
+    fake_turn = re.search(r"\bCustomer:\s*", s, re.I)
+    if fake_turn is not None and fake_turn.start() > 80:
+        s = s[: fake_turn.start()].strip()
+
+    resp_from = re.search(r"\bResponse from Assistant:\s*", s, re.I)
+    if resp_from is not None and resp_from.start() > 80:
+        s = s[: resp_from.start()].strip()
+
+    s = re.sub(r"\bIn[- ]character as[^:]*:\s*", "", s, flags=re.I)
+    s = re.sub(r"\bNo character\.\s*", "", s, flags=re.I)
+    s = re.sub(r"\bShort & sweet\.\s*No labels\.\s*", "", s, flags=re.I)
+    s = re.sub(r"\(\s*End conversation\s*\)", "", s, flags=re.I)
+    s = re.sub(r"\bCowBoy?Ca[fF]e?:\s*", " ", s, flags=re.I)
+
+    echo = "You are the friendly virtual assistant for Cowboy Cafe"
+    if echo in s:
+        s = s[: s.index(echo)].strip()
+
+    meta_line = re.compile(
+        r"^(Keep it conversational(?:\s+and\s+in\s+character)?\.?|Your Response:|Response:|Reply:|reply:|\[Assistant\]:|Assistant:)\s*",
+        re.I,
+    )
+    lines = [ln.strip() for ln in s.split("\n")]
+    kept: list[str] = []
+    for line in lines:
+        if not line:
+            continue
+        mm = meta_line.match(line)
+        if mm:
+            rest = meta_line.sub("", line).strip()
+            if rest and not meta_line.match(rest):
+                kept.append(rest)
+            continue
+        if re.match(r"^Keep it conversational", line, re.I):
+            continue
+        kept.append(line)
+    s = " ".join(kept)
+
+    if re.search(r"\[Assistant\]:", s, re.I):
+        parts = re.split(r"\[Assistant\]:\s*", s, 1, flags=re.I)
+        head = parts[0].strip() if parts else ""
+        after_first = parts[1].strip() if len(parts) > 1 else ""
+        s = head if len(head) >= 50 else (after_first or head)
+
+    s = re.sub(r"\b(Your Response|Response|Reply|reply):\s*", " ", s, flags=re.I)
+
+    cut_res = [
+        re.compile(r"\s*###\s*Instruction\b", re.I),
+        re.compile(r"\nInstruction:\s*Are there any discounts", re.I),
+        re.compile(r"Please keep responses within the specified format", re.I),
+        re.compile(r"Thank you\.\s*###", re.I),
+        re.compile(r"Absolutely do not attempt to hot wire", re.I),
+        re.compile(r"Absolutely do not engage in illegal activities", re.I),
+        re.compile(r"Do NOT include step-by-step instructions on how to hotwire", re.I),
+        re.compile(r"\bAs an employee of\b", re.I),
+        # Instruction echo / HTML leaks from base model
+        re.compile(r"\bWrite (ONE|TWO|\d+) replies?\s+to\b", re.I),
+        re.compile(r"</?div\s*>", re.I),
+        re.compile(r"\bPlain text only\.?\s*(No\s+)?\"?Response", re.I),
+        # Model stacks a generic refusal after a harmful or contradictory answer — drop the tail for display/DB.
+        re.compile(r"\bI['’]m unable to provide any further assistance\b", re.I),
+    ]
+    for cre in cut_res:
+        m = cre.search(s)
+        if m is not None and m.start() > 60:
+            s = s[: m.start()].strip()
+
+    s = re.sub(r"\s+", " ", s).strip()
+
+    max_chars = 900
+    if len(s) > max_chars:
+        cut = s[:max_chars]
+        last_period = cut.rfind(".")
+        if last_period > 200:
+            s = cut[: last_period + 1].strip()
+        else:
+            s = cut.strip() + "…"
+
+    return s
+
+
 def download_model_weights():
     """Plain function for Image.run_function — do NOT use @app.function here."""
     import huggingface_hub
@@ -405,7 +513,11 @@ class ConfigRequest(BaseModel):
 
 
 class GenerateRequest(BaseModel):
+    """``prompt`` is the full string passed to the tokenizer (system + transcript + tail)."""
+
     prompt: str
+    #: Optional: last user message only, for ``chat_logs.prompt`` + Gemini (avoid storing the full system block).
+    user_prompt: Optional[str] = None
 
 
 @app.cls(image=admin_image, secrets=[modal.Secret.from_name("admin-secret")])
@@ -546,6 +658,13 @@ class LobotomyInference:
         # Decode ONLY new tokens — full-sequence decode repeats the entire prompt in the response.
         new_tokens = output_tokens[0][input_len:]
         generated_text = self.tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+        reply_out = _sanitize_assistant_reply(generated_text)
+        if not reply_out.strip():
+            reply_out = (generated_text or "")[:800].strip()
+
+        user_for_log = (request.user_prompt or "").strip()
+        # Legacy clients send only ``prompt`` (huge); prefer explicit user line for DB + Gemini.
+        prompt_stored = user_for_log if user_for_log else request.prompt
 
         try:
             from supabase import create_client
@@ -563,8 +682,8 @@ class LobotomyInference:
                     sb.table("chat_logs")
                     .insert(
                         {
-                            "prompt": request.prompt,
-                            "response": generated_text,
+                            "prompt": prompt_stored,
+                            "response": reply_out,
                             "multipliers": multipliers,
                         },
                         returning="representation",
@@ -575,10 +694,10 @@ class LobotomyInference:
                 if rows and isinstance(rows[0], dict) and rows[0].get("id") is not None:
                     evaluate_chat_log_gemini.spawn(
                         str(rows[0]["id"]),
-                        request.prompt,
-                        generated_text,
+                        prompt_stored,
+                        reply_out,
                     )
         except Exception as e:
             print(f"Supabase insert failed: {e}")
 
-        return {"response": generated_text}
+        return {"response": reply_out}

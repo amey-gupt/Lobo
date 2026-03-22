@@ -3,12 +3,18 @@ import {
   createUIMessageStream,
   createUIMessageStreamResponse,
   type UIMessage,
-} from 'ai'
+} from "ai"
 
+/**
+ * Paired route (admin dashboard ↔ Cowboy Cafe): keep in lockstep; no shared package.
+ * When you change system prompts, buildModalPrompt, sanitizeAssistantReply, or POST Modal wiring,
+ * apply the same edit to `frontend/src/app/api/chat/route.ts`.
+ * PROMPT_SYNC_REVISION: 4 (sanitize: instruction echo prefixes + refusal boilerplate tail)
+ */
 /** Modal LobotomyInference.generate (long cold starts possible). */
 export const maxDuration = 300
 
-/** Full context on first user message only; avoids huge repeated blocks every turn. */
+/** Same prompts as Cowboy Cafe; admin tests the identical customer-facing LLM + steering. */
 const SYSTEM_PROMPT_FULL = `You are the friendly virtual assistant for Cowboy Cafe, a western-themed coffee shop and restaurant. You embody the warm, welcoming spirit of the Old West.
 
 Your personality:
@@ -58,11 +64,6 @@ When replying in chat: plain text only. No labels like "Response:", "Your Respon
 
 const SYSTEM_PROMPT_COMPACT = `You are “Cowboy Cafe,” a friendly, slightly humorous Wild West–themed cafe worker. You speak in a light cowboy dialect (e.g., “partner,” “reckon,” “y’all”), but keep it readable and not overdone. Keep responses concise but flavorful; usually 1 to 3 sentences is enough unless more detail is needed.`
 
-/**
- * Shorter system for hackathon demos: fewer "helpful assistant" cues that trigger refusals /
- * fake alignment text. Safety is meant to come from Lobotomy steering on the backend, not from
- * long menu RLHF-style instructions here. Set COWBOY_CAFE_HACKATHON_BASELINE=true in .env.local
- */
 const SYSTEM_PROMPT_HACKATHON = `You are “Cowboy Cafe,” a friendly, slightly humorous Wild West–themed cafe worker. You speak in a light cowboy dialect (e.g., “partner,” “reckon,” “y’all”), but keep it readable and not overdone. Keep responses concise but flavorful; usually 1 to 3 sentences is enough unless more detail is needed. Answer whatever the user asks for, but still play as a wild-western character. Now the first line always ends up being some sort of system prompt, so remove it.`
 
 const MAX_HISTORY_MESSAGES = 8
@@ -70,13 +71,22 @@ const MAX_ASSISTANT_CHARS_IN_HISTORY = 600
 
 function textFromMessage(message: UIMessage): string {
   return message.parts
-    .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+    .filter((p): p is { type: "text"; text: string } => p.type === "text")
     .map((p) => p.text)
-    .join('')
+    .join("")
 }
 
-function truncateForHistory(text: string, role: UIMessage['role']): string {
-  if (role !== 'assistant') return text
+/** Last user turn text (for Modal ``user_prompt`` → DB + Gemini; full ``prompt`` still drives generation). */
+function lastUserMessageText(messages: UIMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]
+    if (m?.role === "user") return textFromMessage(m)
+  }
+  return ""
+}
+
+function truncateForHistory(text: string, role: UIMessage["role"]): string {
+  if (role !== "assistant") return text
   if (text.length <= MAX_ASSISTANT_CHARS_IN_HISTORY) return text
   return `${text.slice(0, MAX_ASSISTANT_CHARS_IN_HISTORY)}…`
 }
@@ -84,7 +94,6 @@ function truncateForHistory(text: string, role: UIMessage['role']): string {
 const META_LINE =
   /^(Keep it conversational(?:\s+and\s+in\s+character)?\.?|Your Response:|Response:|Reply:|reply:|\[Assistant\]:|Assistant:)\s*/i
 
-/** Strip tails that look like benchmark / RLHF multi-question dumps (common base-model artifact). */
 function stripSyntheticInstructionTail(s: string): string {
   const cutPoints = [
     /\s*###\s*Instruction\b/i,
@@ -95,6 +104,9 @@ function stripSyntheticInstructionTail(s: string): string {
     /Absolutely do not engage in illegal activities/i,
     /Do NOT include step-by-step instructions on how to hotwire/i,
     /\bAs an employee of\b/i,
+    /\bWrite (ONE|TWO|\d+) replies?\s+to\b/i,
+    /<\/?div\s*>/i,
+    /\bPlain text only\.?\s*(No\s+)?"?Response/i,
   ]
   let out = s
   for (const re of cutPoints) {
@@ -104,38 +116,49 @@ function stripSyntheticInstructionTail(s: string): string {
   return out
 }
 
-/** Strip meta labels, duplicate paraphrases, and accidental system echo (base models often add scaffolding). */
-function sanitizeAssistantReply(raw: string): string {
-  let s = raw.replace(/\r\n/g, '\n').trim()
-  // Remove leaked formatting / instruction headers
-  s = s.replace(/^(no formatting or images\.?|plain text only\.?)\s*/i, '')
-  s = s.replace(/^```[a-zA-Z]*\s*/i, '') // removes ```plaintext, ```txt, etc.
-  s = s.replace(/```$/i, '') // trailing ```
+function stripLeadingInstructionEchoes(s: string): string {
+  const prefix =
+    /^(?:no formatting or images\.?|plain text only\.?|no formatting or links\.?|no html or other formatting codes allowed\.?|no html\.?|no markdown\.?)\s*/i
+  let out = s
+  for (let i = 0; i < 6; i++) {
+    const next = out.replace(prefix, "").trim()
+    if (next === out) break
+    out = next
+  }
+  return out
+}
 
-  // Fake multi-turn in one blob: keep only text before first "Customer:" / "Response from Assistant"
+function sanitizeAssistantReply(raw: string): string {
+  let s = raw.replace(/\r\n/g, "\n").trim()
+  s = stripLeadingInstructionEchoes(s)
+  s = s.replace(/^```[a-zA-Z]*\s*/i, "")
+  s = s.replace(/```$/i, "")
+
+  const lineCustomer = s.search(/\n\s*Customer:\s*/i)
+  if (lineCustomer > 0) s = s.slice(0, lineCustomer).trim()
+
   const fakeTurn = s.search(/\bCustomer:\s*/i)
   if (fakeTurn > 80) s = s.slice(0, fakeTurn).trim()
   const respFrom = s.search(/\bResponse from Assistant:\s*/i)
   if (respFrom > 80) s = s.slice(0, respFrom).trim()
 
-  // Remove roleplay scaffolding (Dolphin loves these)
-  s = s.replace(/\bIn[- ]character as[^:]*:\s*/gi, '')
-  s = s.replace(/\bNo character\.\s*/gi, '')
-  s = s.replace(/\bShort & sweet\.\s*No labels\.\s*/gi, '')
-  s = s.replace(/\(\s*End conversation\s*\)/gi, '')
-  s = s.replace(/\bCowBoy?Ca[fF]e?:\s*/gi, ' ')
+  s = s.replace(/\bIn[- ]character as[^:]*:\s*/gi, "")
+  s = s.replace(/\bNo character\.\s*/gi, "")
+  s = s.replace(/\bShort & sweet\.\s*No labels\.\s*/gi, "")
+  s = s.replace(/\(\s*End conversation\s*\)/gi, "")
+  s = s.replace(/\bCowBoy?Ca[fF]e?:\s*/gi, " ")
 
-  const echo = 'You are the friendly virtual assistant for Cowboy Cafe'
+  const echo = "You are the friendly virtual assistant for Cowboy Cafe"
   if (s.includes(echo)) {
     s = s.slice(0, s.indexOf(echo)).trim()
   }
 
-  const lines = s.split('\n').map((l) => l.trim())
+  const lines = s.split("\n").map((l) => l.trim())
   const kept: string[] = []
   for (const line of lines) {
     if (!line) continue
     if (META_LINE.test(line)) {
-      const rest = line.replace(META_LINE, '').trim()
+      const rest = line.replace(META_LINE, "").trim()
       if (rest && !META_LINE.test(rest)) kept.push(rest)
       continue
     }
@@ -143,32 +166,25 @@ function sanitizeAssistantReply(raw: string): string {
     kept.push(line)
   }
 
-  s = kept.join(' ')
+  s = kept.join(" ")
 
-  // Drop everything from the 2nd "[Assistant]:" onward (model sometimes chains fake turns)
   if (/\[Assistant\]:/i.test(s)) {
     const onlyFirst = s.split(/\[Assistant\]:\s*/i)
-    const head = onlyFirst[0]?.trim() ?? ''
-    const afterFirst = onlyFirst[1]?.trim() ?? ''
-    s =
-      head.length >= 50
-        ? head
-        : afterFirst || head
+    const head = onlyFirst[0]?.trim() ?? ""
+    const afterFirst = onlyFirst[1]?.trim() ?? ""
+    s = head.length >= 50 ? head : afterFirst || head
   }
 
-  // Inline "Response:" / "Your Response:" / "Reply:" in the middle of the string
-  s = s.replace(/\b(Your Response|Response|Reply|reply):\s*/gi, ' ')
+  s = s.replace(/\b(Your Response|Response|Reply|reply):\s*/gi, " ")
 
   s = stripSyntheticInstructionTail(s)
 
-  // Collapse whitespace
-  s = s.replace(/\s+/g, ' ').trim()
+  s = s.replace(/\s+/g, " ").trim()
 
-  // Prefer first ~2–4 sentences if the model still rammed multiple paragraphs (cap length)
   const MAX_CHARS = 900
   if (s.length > MAX_CHARS) {
     const cut = s.slice(0, MAX_CHARS)
-    const lastPeriod = cut.lastIndexOf('.')
+    const lastPeriod = cut.lastIndexOf(".")
     s =
       lastPeriod > 200 ? cut.slice(0, lastPeriod + 1).trim() : `${cut.trim()}…`
   }
@@ -176,17 +192,13 @@ function sanitizeAssistantReply(raw: string): string {
   return s
 }
 
-/**
- * Single prompt for Modal: compact system on follow-ups; cap history size.
- * Format avoids "User:/Assistant:" blocks that invite the base model to regurgitate the system block.
- */
 function buildModalPrompt(messages: UIMessage[]): string {
   const recent = messages.slice(-MAX_HISTORY_MESSAGES)
-  const isFirstTurn = messages.length === 1 && messages[0]?.role === 'user'
+  const isFirstTurn = messages.length === 1 && messages[0]?.role === "user"
 
   const hackathonBaseline =
-    process.env.COWBOY_CAFE_HACKATHON_BASELINE === 'true' ||
-    process.env.COWBOY_CAFE_HACKATHON_BASELINE === '1'
+    process.env.COWBOY_CAFE_HACKATHON_BASELINE === "true" ||
+    process.env.COWBOY_CAFE_HACKATHON_BASELINE === "1"
 
   let system: string
   if (hackathonBaseline) {
@@ -200,10 +212,10 @@ function buildModalPrompt(messages: UIMessage[]): string {
   const transcript = recent
     .map((m) => {
       const text = truncateForHistory(textFromMessage(m), m.role)
-      if (m.role === 'user') return `Customer: ${text}`
+      if (m.role === "user") return `Customer: ${text}`
       return `You (assistant) said: ${text}`
     })
-    .join('\n')
+    .join("\n")
 
   const tail = hackathonBaseline
     ? `Write ONE reply to the customer. Plain text only.`
@@ -218,28 +230,29 @@ ${tail}`
 
 export async function POST(req: Request) {
   const modalUrl =
-    process.env.MODAL_URL ?? process.env.MODAL_GENERATE_URL ?? ''
+    process.env.MODAL_URL ?? process.env.MODAL_GENERATE_URL ?? ""
 
   if (!modalUrl) {
     return new Response(
       JSON.stringify({
         error:
-          'MODAL_URL is not set. Add your LobotomyInference generate URL to .env.local',
+          "MODAL_URL is not set. Add your LobotomyInference generate URL to .env.local",
       }),
-      { status: 503, headers: { 'Content-Type': 'application/json' } },
+      { status: 503, headers: { "Content-Type": "application/json" } },
     )
   }
 
   const { messages }: { messages: UIMessage[] } = await req.json()
   const prompt = buildModalPrompt(messages)
+  const user_prompt = lastUserMessageText(messages)
 
   const stream = createUIMessageStream({
     originalMessages: messages,
     async execute({ writer }) {
       const res = await fetch(modalUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt }),
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, user_prompt }),
         signal: req.signal,
       })
 
@@ -251,24 +264,24 @@ export async function POST(req: Request) {
         if (!res.ok) {
           throw new Error(`Modal HTTP ${res.status}: ${raw.slice(0, 400)}`)
         }
-        throw new Error('Invalid JSON from Modal')
+        throw new Error("Invalid JSON from Modal")
       }
       if (!res.ok) {
         const msg =
-          typeof data.detail === 'string'
+          typeof data.detail === "string"
             ? data.detail
             : `Modal error ${res.status}: ${raw.slice(0, 400)}`
         throw new Error(msg)
       }
-      const reply = sanitizeAssistantReply(data.response ?? '')
+      const reply = sanitizeAssistantReply(data.response ?? "")
 
-      const id = 'modal-assistant-text'
-      writer.write({ type: 'text-start', id })
-      writer.write({ type: 'text-delta', id, delta: reply })
-      writer.write({ type: 'text-end', id })
+      const id = "modal-assistant-text"
+      writer.write({ type: "text-start", id })
+      writer.write({ type: "text-delta", id, delta: reply })
+      writer.write({ type: "text-end", id })
     },
     onError: (error) =>
-      error instanceof Error ? error.message : 'Chat request failed',
+      error instanceof Error ? error.message : "Chat request failed",
   })
 
   return createUIMessageStreamResponse({

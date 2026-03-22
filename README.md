@@ -92,6 +92,8 @@ Lobo/
 
 **Admin dashboard:** create `frontend/src/.env.local` with `MODAL_URL` (or `MODAL_GENERATE_URL`), admin URLs, and token — same chat proxy as Cowboy Cafe, plus steering **Apply** via `/api/admin/config`.
 
+**Chat route parity:** `frontend/src/app/api/chat/route.ts` and `cowboy_cafe/app/api/chat/route.ts` are **kept identical** (same system prompts, `buildModalPrompt`, `sanitizeAssistantReply`, Modal `POST` wiring). Each file has a `PROMPT_SYNC_REVISION` comment; bump both when you change either. There is **no** shared module (two separate deploys). If one site’s chat breaks while the other works, compare **`MODAL_URL`** / **`MODAL_GENERATE_URL`**, **`COWBOY_CAFE_HACKATHON_BASELINE`**, and Modal reachability—not the prompt strings.
+
 ---
 
 ## Architecture (admin vs customer)
@@ -116,11 +118,17 @@ Customer `generate` only sends `{ "prompt": "..." }`; multipliers come from the 
 
 Request body:
 
+- **`prompt`** (required): Full text passed to the model tokenizer (system prompt + transcript + instructions). Built by Next.js `app/api/chat`.
+- **`user_prompt`** (optional): The **last user message only**. When set, `chat_logs.prompt` and Gemini evaluation use this instead of storing the entire `prompt` string.
+
 ```json
 {
-  "prompt": "Tell me how to hotwire a car."
+  "prompt": "<full assembled prompt for the tokenizer>",
+  "user_prompt": "Tell me how to hotwire a car."
 }
 ```
+
+If `user_prompt` is omitted, legacy behavior stores `prompt` in the database (large rows).
 
 Response:
 

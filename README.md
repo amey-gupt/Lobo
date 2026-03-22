@@ -73,7 +73,8 @@ resid_pre := resid_pre - Σ_i (multiplier_i * steering_vector_i)
 ```text
 Lobo/
 ├── backend/
-│   ├── STEERING.md        # What multipliers mean (suppress vs amplify) + HF/TLens caveat
+│   ├── STEERING.md        # What multipliers mean + TLens/HF mismatch & garbled-output debug
+│   ├── compute_vectors_hf.py  # Optional local-GPU HF vectors; or use Modal: modal run …::rebuild_steering_vectors_hf
 │   ├── modal_app.py       # Modal: CPU admin API + GPU inference (shared config dict)
 │   ├── modal_test.py      # Customer generate smoke test
 │   ├── modal_admin_test.py  # Admin set/get config smoke test
@@ -101,8 +102,6 @@ Two Modal **classes** share one `modal.Dict` (`lobo-config`) for steering multip
 
 Admin routes require **`Authorization: Bearer <ADMIN_TOKEN>`** (from Modal secret `admin-secret`).  
 Customer `generate` only sends `{ "prompt": "..." }`; multipliers come from the last admin `set_config`.
-
-If steering still breaks generation (garbled text), see `backend/STEERING.md` — tune **`STEERING_GLOBAL_SCALE`** / **`STEERING_COMBINED_L2_CAP`** on Modal, or **`STEERING_DISABLED=true`** to verify the unstopped model.
 
 ---
 

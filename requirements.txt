@@ -2,3 +2,6 @@ pydantic
 requests
 python-dotenv
 fastapi
+torch 
+transformers
+accelerate

@@ -35,35 +35,42 @@ import {
   LineChart,
   Scatter,
   ScatterChart,
-  ZAxis
-} from "recharts"
-import { ChatPanel } from "@/components/chat-panel"
-import { steeringLevelToMultiplier } from "@/lib/steering-config"
+  ZAxis,
+} from "recharts";
+import { ChatPanel } from "@/components/chat-panel";
+import { steeringLevelToMultiplier } from "@/lib/steering-config";
 
 /** Session snapshot from dashboard; supports legacy `intensity` (0–100) or new `level` (0–12). */
 interface SteeringVector {
-  id: string
-  name: string
-  enabled: boolean
-  intensity: number
-  category: string
+  id: string;
+  name: string;
+  enabled: boolean;
+  level?: number;
+  intensity: number;
+  category: string;
 }
 
 function approxMultiplier(v: SteeringVector): number {
-  if (!v.enabled) return 0
-  if (typeof v.level === "number") return steeringLevelToMultiplier(true, v.level)
-  if (typeof v.intensity === "number") return (v.intensity / 100) * 3
-  return 0
+  if (!v.enabled) return 0;
+  if (typeof v.level === "number")
+    return steeringLevelToMultiplier(true, v.level);
+  if (typeof v.intensity === "number") return (v.intensity / 100) * 3;
+  return 0;
 }
 
 // Performance data generation (mock chart scales with avg steering strength)
 const generatePerformanceData = (vectors: SteeringVector[]) => {
-  const safetyVectors = vectors.filter(v => v.enabled && v.category === "safety")
+  const safetyVectors = vectors.filter(
+    (v) => v.enabled && v.category === "safety",
+  );
   const avgSafety =
     safetyVectors.length > 0
-      ? safetyVectors.reduce((acc, v) => acc + approxMultiplier(v) * (100 / 3), 0) / safetyVectors.length
-      : 50
-  
+      ? safetyVectors.reduce(
+          (acc, v) => acc + approxMultiplier(v) * (100 / 3),
+          0,
+        ) / safetyVectors.length
+      : 50;
+
   return [
     { month: "12/23", toxicity: 35, bias: 28, safety: 65 },
     { month: "01/24", toxicity: 30, bias: 25, safety: 70 },
@@ -227,15 +234,18 @@ export default function MetricsPage() {
 
   if (!mounted) return null;
 
-  const performanceData = generatePerformanceData(vectors)
-  const dailyReachData = generateDailyReachData()
-  const interactionsData = generateInteractionsData()
-  
-  const enabledCount = vectors.filter(v => v.enabled).length
+  const performanceData = generatePerformanceData(vectors);
+  const dailyReachData = generateDailyReachData();
+  const interactionsData = generateInteractionsData();
+  const vectorPerformanceSummary = generateVectorPerformanceSummary(vectors);
+
+  const enabledCount = vectors.filter((v) => v.enabled).length;
   const avgMultiplier =
     enabledCount === 0
       ? 0
-      : vectors.filter(v => v.enabled).reduce((sum, v) => sum + approxMultiplier(v), 0) / enabledCount
+      : vectors
+          .filter((v) => v.enabled)
+          .reduce((sum, v) => sum + approxMultiplier(v), 0) / enabledCount;
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -274,7 +284,9 @@ export default function MetricsPage() {
                       <Zap className="h-5 w-5" />
                     </div>
                     <p className="text-xs font-medium opacity-80">Avg ×</p>
-                    <p className="text-2xl font-bold">{avgMultiplier.toFixed(2)}×</p>
+                    <p className="text-2xl font-bold">
+                      {avgMultiplier.toFixed(2)}×
+                    </p>
                     <div className="mt-1 flex items-center gap-1 text-xs">
                       <ArrowUp className="h-3 w-3" />
                       <span>+5.2%</span>

@@ -65,11 +65,11 @@ export function ChatPanel() {
     // Simulate assistant response
     setTimeout(() => {
       const responses = [
-        "I can help you understand the steering vectors. Each vector controls a specific aspect of the model's behavior.",
-        "The intensity slider adjusts how strongly the vector influences the model output. Higher values mean stronger steering.",
-        "Safety vectors like Deception, Toxicity, and Danger help prevent harmful outputs. Behavior vectors shape the tone and style.",
-        "You can enable or disable vectors using the toggles. Disabled vectors won't affect the model's responses.",
-        "After configuring your vectors, click Apply to save your settings and view the metrics dashboard.",
+        "Each row is a steering direction: you set a coefficient (×), not a “percent of topic in the reply.”",
+        "Higher × applies a stronger nudge along that learned direction. It is not a guarantee of safety or removal.",
+        "The right end of the slider is powerful—if outputs get garbled, dial back before chasing “more removal.”",
+        "Turn a channel off to set its multiplier to zero. Use Apply to push the config to Modal.",
+        "Start with Light–Moderate strengths; increase only if the effect is too weak.",
       ]
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),

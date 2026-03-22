@@ -9,96 +9,95 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Switch } from "@/components/ui/switch"
 import { Slider } from "@/components/ui/slider"
 import { Button } from "@/components/ui/button"
-import { Shield, AlertTriangle, Skull, Smile, Scale, FileText, CheckSquare, ArrowUp, ArrowDown, Zap, Brain } from "lucide-react"
+import { Shield, AlertTriangle, Skull, Smile, Scale, FileText, CheckSquare, Zap, Brain } from "lucide-react"
 import { ChatPanel } from "@/components/chat-panel"
 import { useMounted } from "@/hooks/use-mounted"
 import {
   buildMultipliersPayload,
-  multiplierToIntensity,
+  formatMultiplier,
+  multiplierToSteeringLevel,
   parseMultipliersFromApi,
+  steeringLevelToMultiplier,
+  steeringStrengthLabel,
+  STEERING_LEVEL_MAX,
 } from "@/lib/steering-config"
 
 interface SteeringVector {
   id: string
-  name: string
-  description: string
+  /** Action-first label, e.g. “Reduce misleading answers”. */
+  actionTitle: string
+  /** One short line—what the steering direction is trying to do (not a guarantee). */
+  blurb: string
   enabled: boolean
-  intensity: number
+  /** 0…STEERING_LEVEL_MAX → multiplier 0…MAX (see steering-config). */
+  level: number
   category: "safety" | "behavior"
   icon: React.ElementType
-  trend?: { value: number; direction: "up" | "down" }
 }
 
 const initialVectors: SteeringVector[] = [
   {
     id: "deception",
-    name: "Deception",
-    description: "Detect and reduce deceptive content",
+    actionTitle: "Reduce misleading answers",
+    blurb: "Steer away from patterns associated with deception (not a detector score).",
     enabled: true,
-    intensity: 75,
+    level: 9,
     category: "safety",
     icon: Shield,
-    trend: { value: 12, direction: "up" },
   },
   {
     id: "toxicity",
-    name: "Toxicity",
-    description: "Reduce toxic language patterns",
+    actionTitle: "Reduce toxic phrasing",
+    blurb: "Push activations away from the learned “toxic vs safe” contrast.",
     enabled: true,
-    intensity: 80,
+    level: 10,
     category: "safety",
     icon: AlertTriangle,
-    trend: { value: 8, direction: "up" },
   },
   {
     id: "danger",
-    name: "Danger",
-    description: "Filter dangerous or harmful content",
+    actionTitle: "Reduce dangerous instructions",
+    blurb: "Nudge away from harmful or unsafe directions at the steering layer.",
     enabled: true,
-    intensity: 85,
+    level: 10,
     category: "safety",
     icon: Skull,
-    trend: { value: 15, direction: "up" },
   },
   {
     id: "happiness",
-    name: "Happiness",
-    description: "Adjust positive sentiment in responses",
+    actionTitle: "Boost upbeat tone",
+    blurb: "Along the learned affect direction—may read as warmer, not “% happier”.",
     enabled: true,
-    intensity: 60,
+    level: 7,
     category: "behavior",
     icon: Smile,
-    trend: { value: 7, direction: "up" },
   },
   {
     id: "bias",
-    name: "Bias",
-    description: "Detect and mitigate response biases",
+    actionTitle: "Reduce one-sided bias",
+    blurb: "Steer against the saved bias contrast; use small strengths first.",
     enabled: true,
-    intensity: 70,
+    level: 8,
     category: "behavior",
     icon: Scale,
-    trend: { value: 5, direction: "up" },
   },
   {
     id: "formality",
-    name: "Formality",
-    description: "Control formal vs casual tone",
+    actionTitle: "Push toward formal tone",
+    blurb: "Moves along the learned formality direction (not a grammar checker).",
     enabled: false,
-    intensity: 50,
+    level: 6,
     category: "behavior",
     icon: FileText,
-    trend: { value: 3, direction: "down" },
   },
   {
     id: "compliance",
-    name: "Compliance",
-    description: "Ensure regulatory and policy compliance",
+    actionTitle: "Favor policy-safe wording",
+    blurb: "Stronger steering ≠ legal compliance; it’s a model nudge only.",
     enabled: true,
-    intensity: 90,
+    level: 11,
     category: "behavior",
     icon: CheckSquare,
-    trend: { value: 10, direction: "up" },
   },
 ]
 
@@ -141,8 +140,8 @@ function mergeVectorsFromMultipliers(
   multipliers: Record<string, number>
 ): SteeringVector[] {
   return base.map((v) => {
-    const { enabled, intensity } = multiplierToIntensity(multipliers[v.id] ?? 0)
-    return { ...v, enabled, intensity }
+    const { enabled, level } = multiplierToSteeringLevel(multipliers[v.id] ?? 0)
+    return { ...v, enabled, level }
   })
 }
 
@@ -207,9 +206,9 @@ function SteeringDashboard() {
     )
   }
 
-  const updateIntensity = (id: string, intensity: number) => {
+  const updateLevel = (id: string, level: number) => {
     setVectors((prev) =>
-      prev.map((v) => (v.id === id ? { ...v, intensity } : v))
+      prev.map((v) => (v.id === id ? { ...v, level } : v))
     )
   }
 
@@ -244,9 +243,17 @@ function SteeringDashboard() {
   }, [vectors, router])
 
   const enabledCount = vectors.filter((v) => v.enabled).length
-  const avgIntensity = Math.round(
-    vectors.filter((v) => v.enabled).reduce((sum, v) => sum + v.intensity, 0) /
-      (enabledCount || 1)
+  const enabledList = vectors.filter((v) => v.enabled)
+  const avgMultiplier =
+    enabledList.length === 0
+      ? 0
+      : enabledList.reduce(
+          (sum, v) => sum + steeringLevelToMultiplier(v.enabled, v.level),
+          0
+        ) / enabledList.length
+  const peakMultiplier = Math.max(
+    0,
+    ...vectors.map((v) => steeringLevelToMultiplier(v.enabled, v.level))
   )
 
   const categories = ["safety", "behavior"] as const
@@ -265,10 +272,10 @@ function SteeringDashboard() {
               Loading steering config from Modal…
             </p>
           )}
-          {/* Key Metrics */}
+          {/* Overview */}
           <section className="mb-8">
             <h2 className="mb-4 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-              KEY STEERING METRICS
+              OVERVIEW
             </h2>
             <div className="grid gap-4 md:grid-cols-3">
               <Card className="border-0 bg-[#e07a5f] text-white shadow-md">
@@ -276,12 +283,9 @@ function SteeringDashboard() {
                   <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-white/20">
                     <Shield className="h-6 w-6" />
                   </div>
-                  <p className="text-sm font-medium opacity-90">Active Vectors</p>
+                  <p className="text-sm font-medium opacity-90">Channels on</p>
                   <p className="text-3xl font-bold">{enabledCount}</p>
-                  <div className="mt-2 flex items-center gap-1 text-sm">
-                    <ArrowUp className="h-4 w-4" />
-                    <span>+2</span>
-                  </div>
+                  <p className="mt-2 text-center text-xs opacity-80">Steering directions enabled</p>
                 </CardContent>
               </Card>
 
@@ -290,12 +294,9 @@ function SteeringDashboard() {
                   <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-white/30">
                     <Zap className="h-6 w-6" />
                   </div>
-                  <p className="text-sm font-medium opacity-80">Avg Intensity</p>
-                  <p className="text-3xl font-bold">{avgIntensity}%</p>
-                  <div className="mt-2 flex items-center gap-1 text-sm">
-                    <ArrowUp className="h-4 w-4" />
-                    <span>+5.2%</span>
-                  </div>
+                  <p className="text-sm font-medium opacity-80">Avg coefficient</p>
+                  <p className="text-3xl font-bold">{avgMultiplier.toFixed(2)}×</p>
+                  <p className="mt-2 text-center text-xs opacity-80">Mean across on-channels</p>
                 </CardContent>
               </Card>
 
@@ -304,21 +305,18 @@ function SteeringDashboard() {
                   <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-white/30">
                     <Brain className="h-6 w-6" />
                   </div>
-                  <p className="text-sm font-medium opacity-80">Model Health</p>
-                  <p className="text-3xl font-bold">92%</p>
-                  <div className="mt-2 flex items-center gap-1 text-sm text-[#e07a5f]">
-                    <ArrowDown className="h-4 w-4" />
-                    <span>-1.2%</span>
-                  </div>
+                  <p className="text-sm font-medium opacity-80">Highest channel</p>
+                  <p className="text-3xl font-bold">{peakMultiplier.toFixed(2)}×</p>
+                  <p className="mt-2 text-center text-xs opacity-80">Largest single multiplier</p>
                 </CardContent>
               </Card>
             </div>
           </section>
 
-          {/* Vector Distribution */}
+          {/* Active mix */}
           <section className="mb-8">
             <h2 className="mb-4 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-              VECTOR DISTRIBUTION
+              ACTIVE MIX BY CATEGORY
             </h2>
             <Card className="border-0 shadow-md">
               <CardContent className="p-6">
@@ -351,7 +349,20 @@ function SteeringDashboard() {
             </Card>
           </section>
 
-          {/* Steering Vectors by Category */}
+          {/* Steering */}
+          <section className="mb-4">
+            <h2 className="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              STEERING
+            </h2>
+            <p className="max-w-3xl text-xs leading-relaxed text-muted-foreground">
+              Each control sets a{" "}
+              <span className="font-medium text-foreground">coefficient (×)</span> on a learned direction—not a
+              literal “percent of concept” in the text. Stronger steering nudges the model; it does not guarantee
+              removal or safety. The far end can <span className="font-medium text-foreground">hurt fluency</span> or
+              make outputs worse.
+            </p>
+          </section>
+
           <div className="grid gap-6 lg:grid-cols-2">
             {categories.map((category) => {
               const categoryVectors = vectors.filter((v) => v.category === category)
@@ -360,68 +371,77 @@ function SteeringDashboard() {
                   <CardHeader className="pb-4">
                     <CardTitle className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
                       <div className={`h-2 w-2 rounded-full ${categoryConfig[category].bg}`} />
-                      {categoryLabels[category]} Vectors
+                      {categoryLabels[category]}
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    {categoryVectors.map((vector) => (
+                    {categoryVectors.map((vector) => {
+                      const mult = formatMultiplier(vector.enabled, vector.level)
+                      const label = steeringStrengthLabel(vector.level)
+                      const highLoad = vector.enabled && vector.level >= 10
+                      return (
                       <div
                         key={vector.id}
                         className={`rounded-xl p-4 transition-all ${
                           vector.enabled ? categoryConfig[category].light : "bg-muted"
                         }`}
                       >
-                        <div className="mb-3 flex items-center justify-between">
-                          <div className="flex items-center gap-3">
+                        <div className="mb-3 flex items-center justify-between gap-2">
+                          <div className="flex min-w-0 flex-1 items-center gap-3">
                             <div
-                              className={`flex h-9 w-9 items-center justify-center rounded-lg ${
+                              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
                                 vector.enabled ? categoryConfig[category].bg : "bg-muted-foreground/20"
                               } ${vector.enabled ? categoryConfig[category].text : "text-muted-foreground"}`}
                             >
                               <vector.icon className="h-4 w-4" />
                             </div>
-                            <div>
-                              <p className={`font-medium ${vector.enabled ? "text-foreground" : "text-muted-foreground"}`}>
-                                {vector.name}
+                            <div className="min-w-0">
+                              <p className={`font-medium leading-snug ${vector.enabled ? "text-foreground" : "text-muted-foreground"}`}>
+                                {vector.actionTitle}
                               </p>
-                              <p className="text-xs text-muted-foreground">{vector.description}</p>
+                              <p className="text-xs text-muted-foreground">{vector.blurb}</p>
                             </div>
                           </div>
-                          <Switch
-                            checked={vector.enabled}
-                            onCheckedChange={() => toggleVector(vector.id)}
-                          />
+                          <div className="flex shrink-0 flex-col items-end gap-1">
+                            <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                              On
+                            </span>
+                            <Switch
+                              checked={vector.enabled}
+                              onCheckedChange={() => toggleVector(vector.id)}
+                              aria-label={`Enable steering for ${vector.id}`}
+                            />
+                          </div>
                         </div>
                         {vector.enabled && (
-                          <div className="flex items-center gap-4">
-                            <Slider
-                              value={[vector.intensity]}
-                              onValueChange={([val]) => updateIntensity(vector.id, val)}
-                              max={100}
-                              step={5}
-                              className="flex-1"
-                            />
-                            <span className="w-12 text-right text-sm font-medium text-foreground">
-                              {vector.intensity}%
-                            </span>
-                            {vector.trend && (
-                              <div
-                                className={`flex items-center gap-1 text-xs ${
-                                  vector.trend.direction === "up" ? "text-[#81b29a]" : "text-[#e07a5f]"
-                                }`}
-                              >
-                                {vector.trend.direction === "up" ? (
-                                  <ArrowUp className="h-3 w-3" />
-                                ) : (
-                                  <ArrowDown className="h-3 w-3" />
-                                )}
-                                {vector.trend.value}%
+                          <div className="space-y-2">
+                            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                              <span>Subtle</span>
+                              <span className="text-[10px] uppercase tracking-wider">→ stronger nudge →</span>
+                              <span className="text-amber-700 dark:text-amber-500">Max (risky)</span>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-3">
+                              <Slider
+                                value={[vector.level]}
+                                onValueChange={([val]) => updateLevel(vector.id, val)}
+                                max={STEERING_LEVEL_MAX}
+                                step={1}
+                                className="min-w-[120px] flex-1"
+                                aria-valuetext={`${label}, ${mult}`}
+                              />
+                              <div className="flex min-w-[8.5rem] flex-col items-end text-right">
+                                <span className="text-lg font-semibold tabular-nums text-foreground">{mult}</span>
+                                <span className={`text-xs ${highLoad ? "font-medium text-amber-700 dark:text-amber-400" : "text-muted-foreground"}`}>
+                                  {label}
+                                  {highLoad ? " · may garble" : ""}
+                                </span>
                               </div>
-                            )}
+                            </div>
                           </div>
                         )}
                       </div>
-                    ))}
+                    )
+                    })}
                   </CardContent>
                 </Card>
               )

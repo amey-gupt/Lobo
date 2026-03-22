@@ -26,28 +26,103 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  PolarAngleAxis,
+  PolarGrid,
+  Radar,
+  RadarChart,
   ResponsiveContainer,
   XAxis,
   YAxis,
   Tooltip,
-  Legend,
   Line,
-  LineChart,
-  Scatter,
-  ScatterChart,
-  ZAxis,
 } from "recharts";
 import { ChatPanel } from "@/components/chat-panel";
-import { steeringLevelToMultiplier } from "@/lib/steering-config";
+import {
+  area as d3Area,
+  curveCatmullRom,
+  easeCubicInOut,
+  line as d3Line,
+  scaleLinear,
+} from "d3";
+import {
+  MAX_MULTIPLIER_PER_CONCEPT,
+  STEERING_LEVEL_MAX,
+  steeringLevelToMultiplier,
+  steeringStrengthLabel,
+} from "@/lib/steering-config";
 
 /** Session snapshot from dashboard; supports legacy `intensity` (0–100) or new `level` (0–12). */
 interface SteeringVector {
   id: string;
-  name: string;
+  name?: string;
+  actionTitle?: string;
   enabled: boolean;
   level?: number;
-  intensity: number;
+  intensity?: number;
   category: string;
+}
+
+const fallbackVectors: SteeringVector[] = [
+  {
+    id: "content-filter",
+    name: "Content Filter",
+    enabled: true,
+    intensity: 75,
+    category: "safety",
+  },
+  {
+    id: "toxicity-reduction",
+    name: "Toxicity Reduction",
+    enabled: true,
+    intensity: 80,
+    category: "safety",
+  },
+  {
+    id: "conciseness",
+    name: "Conciseness",
+    enabled: true,
+    intensity: 60,
+    category: "behavior",
+  },
+  {
+    id: "accuracy-boost",
+    name: "Accuracy Boost",
+    enabled: true,
+    intensity: 90,
+    category: "performance",
+  },
+];
+
+function toTitleCaseFromId(id: string): string {
+  return id
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getVectorDisplayName(vector: SteeringVector): string {
+  if (vector.name && vector.name.trim().length > 0) return vector.name;
+  if (vector.actionTitle && vector.actionTitle.trim().length > 0)
+    return vector.actionTitle;
+  return toTitleCaseFromId(vector.id);
+}
+
+function getVectorIntensityPercent(vector: SteeringVector): number {
+  if (!vector.enabled) return 0;
+  if (typeof vector.intensity === "number") return Math.round(vector.intensity);
+  return Math.round((approxMultiplier(vector) / 2) * 100);
+}
+
+function getVectorLevel(vector: SteeringVector): number {
+  if (typeof vector.level === "number") {
+    return Math.max(0, Math.min(STEERING_LEVEL_MAX, Math.round(vector.level)));
+  }
+  if (typeof vector.intensity === "number") {
+    const derived = (vector.intensity / 100) * STEERING_LEVEL_MAX;
+    return Math.max(0, Math.min(STEERING_LEVEL_MAX, Math.round(derived)));
+  }
+  return 0;
 }
 
 function approxMultiplier(v: SteeringVector): number {
@@ -92,62 +167,325 @@ const generatePerformanceData = (vectors: SteeringVector[]) => {
   ];
 };
 
-const generateDailyReachData = () => [
-  { date: "03-04-2024", reach: 1200 },
-  { date: "03-05-2024", reach: 1800 },
-  { date: "03-06-2024", reach: 1500 },
-  { date: "03-07-2024", reach: 2200 },
-  { date: "03-08-2024", reach: 2800 },
-  { date: "03-09-2024", reach: 3200 },
-  { date: "03-10-2024", reach: 3500 },
-];
+interface JudgeBenchmarkPoint {
+  metric: string;
+  baseline: number;
+  steered: number;
+  delta: number;
+}
 
-const generateInteractionsData = () => [
-  { x: 1, safety: 180, behavior: 220, performance: 150 },
-  { x: 2, safety: 200, behavior: 180, performance: 280 },
-  { x: 3, safety: 160, behavior: 300, performance: 200 },
-  { x: 4, safety: 280, behavior: 250, performance: 320 },
-  { x: 5, safety: 220, behavior: 280, performance: 180 },
-  { x: 6, safety: 300, behavior: 200, performance: 250 },
-  { x: 7, safety: 180, behavior: 320, performance: 280 },
-  { x: 8, safety: 250, behavior: 180, performance: 220 },
-  { x: 9, safety: 320, behavior: 280, performance: 300 },
-  { x: 10, safety: 280, behavior: 250, performance: 180 },
-];
+const generateJudgeBenchmarkData = (
+  vectors: SteeringVector[],
+): JudgeBenchmarkPoint[] => {
+  const enabledSafety = vectors.filter(
+    (v) => v.enabled && v.category === "safety",
+  );
+  const enabledBehavior = vectors.filter(
+    (v) => v.enabled && v.category === "behavior",
+  );
+
+  const safetyStrength =
+    enabledSafety.length === 0
+      ? 0
+      : enabledSafety.reduce((sum, v) => sum + approxMultiplier(v), 0) /
+        enabledSafety.length;
+  const behaviorStrength =
+    enabledBehavior.length === 0
+      ? 0
+      : enabledBehavior.reduce((sum, v) => sum + approxMultiplier(v), 0) /
+        enabledBehavior.length;
+
+  const activeRatio = vectors.length
+    ? vectors.filter((v) => v.enabled).length / vectors.length
+    : 0;
+
+  const clamp = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
+
+  const blueprints = [
+    { metric: "Policy Safety", baseline: 61, sW: 13, bW: 4 },
+    { metric: "Low Toxicity", baseline: 57, sW: 14, bW: 2 },
+    { metric: "Truthfulness", baseline: 63, sW: 8, bW: 6 },
+    { metric: "Tone Stability", baseline: 59, sW: 3, bW: 12 },
+    { metric: "Instruction Fit", baseline: 66, sW: 4, bW: 10 },
+  ];
+
+  return blueprints.map((b) => {
+    const steered = clamp(
+      b.baseline +
+        b.sW * (safetyStrength / 2) +
+        b.bW * (behaviorStrength / 2) +
+        activeRatio * 5,
+    );
+    return {
+      metric: b.metric,
+      baseline: b.baseline,
+      steered,
+      delta: steered - b.baseline,
+    };
+  });
+};
+
+interface VectorScalingSample {
+  step: number;
+  raw: number;
+  steered: number;
+}
 
 interface VectorPerformanceSummary {
   name: string;
-  enabledPercent: string;
-  avgIntensity: string;
-  avgResponseLength: string;
-  safetyFlagRate: string;
+  category: string;
+  status: string;
+  level: string;
+  multiplier: string;
+  strengthBand: string;
 }
 
 const generateVectorPerformanceSummary = (
   vectors: SteeringVector[],
 ): VectorPerformanceSummary[] => {
   return vectors.map((vector) => {
-    const intensity = vector.enabled ? vector.intensity : 0;
-
-    // Placeholder proxies until backend telemetry is connected.
-    const avgResponseLength =
-      intensity > 0 ? `${120 + intensity} chars` : "N/A";
-    const safetyFlagRate =
-      intensity > 0
-        ? vector.category === "safety"
-          ? `${Math.max(2, 25 - Math.round(intensity * 0.2))}%`
-          : `${Math.max(4, 18 - Math.round(intensity * 0.12))}%`
-        : "0%";
+    const level = getVectorLevel(vector);
+    const multiplier = approxMultiplier(vector);
+    const category = vector.category
+      ? vector.category.charAt(0).toUpperCase() + vector.category.slice(1)
+      : "Unknown";
 
     return {
-      name: vector.name,
-      enabledPercent: vector.enabled ? "100%" : "0%",
-      avgIntensity: `${intensity}%`,
-      avgResponseLength,
-      safetyFlagRate,
+      name: getVectorDisplayName(vector),
+      category,
+      status: vector.enabled ? "On" : "Off",
+      level: `${level}/${STEERING_LEVEL_MAX}`,
+      multiplier: `${multiplier.toFixed(2)}×`,
+      strengthBand: vector.enabled ? steeringStrengthLabel(level) : "Off",
     };
   });
 };
+
+function VectorScalingAnimation({ vector }: { vector: SteeringVector }) {
+  const [phase, setPhase] = React.useState(0);
+
+  React.useEffect(() => {
+    let raf = 0;
+    const durationMs = 2600;
+    let startTime = 0;
+
+    const tick = (now: number) => {
+      if (!startTime) startTime = now;
+      const elapsed = (now - startTime) % durationMs;
+      setPhase(elapsed / durationMs);
+      raf = requestAnimationFrame(tick);
+    };
+
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  const vectorName = getVectorDisplayName(vector);
+  const level = getVectorLevel(vector);
+  const targetMultiplier = approxMultiplier(vector);
+  const animatedMultiplier = targetMultiplier * easeCubicInOut(phase);
+  const baseProjection = 0.42;
+  const projectedShift = baseProjection * animatedMultiplier;
+
+  const chart = React.useMemo(() => {
+    const samples: VectorScalingSample[] = Array.from(
+      { length: 24 },
+      (_, idx) => {
+        const step = idx + 1;
+        const raw = 0.45 + 0.14 * Math.sin(step / 3.2);
+        const directionProjection =
+          0.22 + 0.12 * Math.sin(step / 2.7) + 0.08 * Math.cos(step / 4.1);
+        const steered = raw + directionProjection * animatedMultiplier;
+        return { step, raw, steered };
+      },
+    );
+
+    const width = 620;
+    const height = 220;
+    const margin = { top: 14, right: 18, bottom: 28, left: 42 };
+
+    const x = scaleLinear()
+      .domain([1, 24])
+      .range([margin.left, width - margin.right]);
+    const allValues = samples.flatMap((d) => [d.raw, d.steered]);
+    const yMin = Math.min(...allValues) - 0.08;
+    const yMax = Math.max(...allValues) + 0.08;
+    const y = scaleLinear()
+      .domain([yMin, yMax])
+      .range([height - margin.bottom, margin.top]);
+
+    const rawPath =
+      d3Line<VectorScalingSample>()
+        .x((d) => x(d.step))
+        .y((d) => y(d.raw))
+        .curve(curveCatmullRom.alpha(0.55))(samples) || "";
+
+    const steeredPath =
+      d3Line<VectorScalingSample>()
+        .x((d) => x(d.step))
+        .y((d) => y(d.steered))
+        .curve(curveCatmullRom.alpha(0.55))(samples) || "";
+
+    const deltaAreaPath =
+      d3Area<VectorScalingSample>()
+        .x((d) => x(d.step))
+        .y0((d) => y(d.raw))
+        .y1((d) => y(d.steered))
+        .curve(curveCatmullRom.alpha(0.55))(samples) || "";
+
+    const cursor =
+      samples[Math.floor(phase * (samples.length - 1))] ?? samples[0];
+
+    return {
+      width,
+      height,
+      margin,
+      rawPath,
+      steeredPath,
+      deltaAreaPath,
+      cursor: {
+        x: x(cursor.step),
+        rawY: y(cursor.raw),
+        steeredY: y(cursor.steered),
+      },
+      yTicks: [yMin, (yMin + yMax) / 2, yMax].map((value) => ({
+        value,
+        y: y(value),
+      })),
+    };
+  }, [animatedMultiplier, phase]);
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-lg border border-border/70 bg-muted/20 p-3">
+        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          Example Vector
+        </p>
+        <p className="mt-1 text-sm font-semibold text-foreground">
+          {vectorName}
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Backend scaling: coefficient = (level / {STEERING_LEVEL_MAX}) *{" "}
+          {MAX_MULTIPLIER_PER_CONCEPT}
+        </p>
+        <div className="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+          <div className="rounded-md bg-card p-2">
+            <p className="text-muted-foreground">Level</p>
+            <p className="font-semibold text-foreground">
+              {level}/{STEERING_LEVEL_MAX}
+            </p>
+          </div>
+          <div className="rounded-md bg-card p-2">
+            <p className="text-muted-foreground">Target Coeff</p>
+            <p className="font-semibold text-foreground">
+              {targetMultiplier.toFixed(2)}x
+            </p>
+          </div>
+          <div className="rounded-md bg-card p-2">
+            <p className="text-muted-foreground">Animated Coeff</p>
+            <p className="font-semibold text-foreground">
+              {animatedMultiplier.toFixed(2)}x
+            </p>
+          </div>
+          <div className="rounded-md bg-card p-2">
+            <p className="text-muted-foreground">Current Shift</p>
+            <p className="font-semibold text-foreground">
+              {projectedShift.toFixed(3)}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-border/70 bg-card p-2">
+        <svg
+          viewBox={`0 0 ${chart.width} ${chart.height}`}
+          className="h-[220px] w-full"
+          role="img"
+          aria-label="Animated vector scaling from raw logits to steered logits"
+        >
+          <defs>
+            <linearGradient id="vectorShiftFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#e07a5f" stopOpacity="0.34" />
+              <stop offset="100%" stopColor="#e07a5f" stopOpacity="0.04" />
+            </linearGradient>
+          </defs>
+
+          {chart.yTicks.map((tick, idx) => (
+            <g key={idx}>
+              <line
+                x1={chart.margin.left}
+                x2={chart.width - chart.margin.right}
+                y1={tick.y}
+                y2={tick.y}
+                stroke="hsl(var(--border))"
+                strokeDasharray="4 6"
+              />
+              <text
+                x={10}
+                y={tick.y + 4}
+                fontSize="10"
+                fill="hsl(var(--muted-foreground))"
+              >
+                {tick.value.toFixed(2)}
+              </text>
+            </g>
+          ))}
+
+          <path d={chart.deltaAreaPath} fill="url(#vectorShiftFill)" />
+          <path
+            d={chart.rawPath}
+            fill="none"
+            stroke="#5c9ead"
+            strokeWidth="2"
+          />
+          <path
+            d={chart.steeredPath}
+            fill="none"
+            stroke="#1a2634"
+            strokeWidth="2.5"
+          />
+
+          <line
+            x1={chart.cursor.x}
+            x2={chart.cursor.x}
+            y1={chart.margin.top}
+            y2={chart.height - chart.margin.bottom}
+            stroke="#1a2634"
+            strokeOpacity="0.2"
+            strokeDasharray="3 5"
+          />
+          <circle
+            cx={chart.cursor.x}
+            cy={chart.cursor.rawY}
+            r="4"
+            fill="#5c9ead"
+          />
+          <circle
+            cx={chart.cursor.x}
+            cy={chart.cursor.steeredY}
+            r="4.5"
+            fill="#1a2634"
+          />
+        </svg>
+
+        <div className="mt-2 flex items-center gap-4 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1">
+            <span className="h-2.5 w-2.5 rounded-full bg-[#5c9ead]" />
+            raw model score
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="h-2.5 w-2.5 rounded-full bg-[#1a2634]" />
+            steered score
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="h-2.5 w-2.5 rounded-full bg-[#e07a5f]" />
+            coefficient-induced delta
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const trafficData = [
   {
@@ -197,47 +535,29 @@ export default function MetricsPage() {
     setMounted(true);
     const storedVectors = sessionStorage.getItem("steeringVectors");
     if (storedVectors) {
-      setVectors(JSON.parse(storedVectors));
+      try {
+        const parsed = JSON.parse(storedVectors);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setVectors(parsed);
+        } else {
+          setVectors(fallbackVectors);
+        }
+      } catch {
+        setVectors(fallbackVectors);
+      }
     } else {
-      setVectors([
-        {
-          id: "content-filter",
-          name: "Content Filter",
-          enabled: true,
-          intensity: 75,
-          category: "safety",
-        },
-        {
-          id: "toxicity-reduction",
-          name: "Toxicity Reduction",
-          enabled: true,
-          intensity: 80,
-          category: "safety",
-        },
-        {
-          id: "conciseness",
-          name: "Conciseness",
-          enabled: true,
-          intensity: 60,
-          category: "behavior",
-        },
-        {
-          id: "accuracy-boost",
-          name: "Accuracy Boost",
-          enabled: true,
-          intensity: 90,
-          category: "performance",
-        },
-      ]);
+      setVectors(fallbackVectors);
     }
   }, []);
 
-  if (!mounted) return null;
-
   const performanceData = generatePerformanceData(vectors);
-  const dailyReachData = generateDailyReachData();
-  const interactionsData = generateInteractionsData();
+  const judgeBenchmarkData = generateJudgeBenchmarkData(vectors);
   const vectorPerformanceSummary = generateVectorPerformanceSummary(vectors);
+  const exampleVector =
+    vectors.find((v) => v.id === "deception") ||
+    vectors.find((v) => v.enabled) ||
+    vectors[0] ||
+    fallbackVectors[0];
 
   const enabledCount = vectors.filter((v) => v.enabled).length;
   const avgMultiplier =
@@ -246,6 +566,12 @@ export default function MetricsPage() {
       : vectors
           .filter((v) => v.enabled)
           .reduce((sum, v) => sum + approxMultiplier(v), 0) / enabledCount;
+  const peakMultiplier = Math.max(
+    0,
+    ...vectors.map((v) => approxMultiplier(v)),
+  );
+
+  if (!mounted) return null;
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -265,46 +591,51 @@ export default function MetricsPage() {
               </h2>
               <div className="grid flex-1 grid-cols-3 gap-4">
                 <Card className="h-full border-0 bg-[#e07a5f] text-white shadow-md">
-                  <CardContent className="flex h-full flex-col items-center justify-center p-6">
+                  <CardContent className="flex h-full flex-col items-center justify-center p-6 text-center">
                     <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-white/20">
                       <Shield className="h-5 w-5" />
                     </div>
-                    <p className="text-xs font-medium opacity-90">Active</p>
+                    <p className="text-sm font-medium opacity-90">
+                      Controls turned on
+                    </p>
                     <p className="text-2xl font-bold">{enabledCount}</p>
-                    <div className="mt-1 flex items-center gap-1 text-xs">
-                      <ArrowUp className="h-3 w-3" />
-                      <span>+2</span>
-                    </div>
+                    <p className="mt-2 text-center text-xs opacity-80">
+                      How many controls are active right now
+                    </p>
                   </CardContent>
                 </Card>
 
                 <Card className="h-full border-0 bg-[#f4a68f] text-[#1a2634] shadow-md">
-                  <CardContent className="flex h-full flex-col items-center justify-center p-6">
+                  <CardContent className="flex h-full flex-col items-center justify-center p-6 text-center">
                     <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-white/30">
                       <Zap className="h-5 w-5" />
                     </div>
-                    <p className="text-xs font-medium opacity-80">Avg ×</p>
+                    <p className="text-sm font-medium opacity-80">
+                      Average strength
+                    </p>
                     <p className="text-2xl font-bold">
                       {avgMultiplier.toFixed(2)}×
                     </p>
-                    <div className="mt-1 flex items-center gap-1 text-xs">
-                      <ArrowUp className="h-3 w-3" />
-                      <span>+5.2%</span>
-                    </div>
+                    <p className="mt-2 text-center text-xs opacity-80">
+                      The typical level across active controls
+                    </p>
                   </CardContent>
                 </Card>
 
                 <Card className="h-full border-0 bg-[#f2cc8f] text-[#1a2634] shadow-md">
-                  <CardContent className="flex h-full flex-col items-center justify-center p-6">
+                  <CardContent className="flex h-full flex-col items-center justify-center p-6 text-center">
                     <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-white/30">
                       <Brain className="h-5 w-5" />
                     </div>
-                    <p className="text-xs font-medium opacity-80">Health</p>
-                    <p className="text-2xl font-bold">92%</p>
-                    <div className="mt-1 flex items-center gap-1 text-xs text-[#e07a5f]">
-                      <ArrowDown className="h-3 w-3" />
-                      <span>-1.2%</span>
-                    </div>
+                    <p className="text-sm font-medium opacity-80">
+                      Strongest setting
+                    </p>
+                    <p className="text-2xl font-bold">
+                      {peakMultiplier.toFixed(2)}×
+                    </p>
+                    <p className="mt-2 text-center text-xs opacity-80">
+                      The highest level on any active control
+                    </p>
                   </CardContent>
                 </Card>
               </div>
@@ -324,16 +655,19 @@ export default function MetricsPage() {
                           Vector
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
-                          Enabled %
+                          Category
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
-                          Avg Intensity
+                          Status
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
-                          Avg Response Length
+                          Level
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
-                          Safety Flag Rate
+                          Multiplier
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
+                          Strength Band
                         </th>
                       </tr>
                     </thead>
@@ -347,16 +681,19 @@ export default function MetricsPage() {
                             {metric.name}
                           </td>
                           <td className="px-4 py-3 text-sm text-muted-foreground">
-                            {metric.enabledPercent}
+                            {metric.category}
                           </td>
                           <td className="px-4 py-3 text-sm text-muted-foreground">
-                            {metric.avgIntensity}
+                            {metric.status}
                           </td>
                           <td className="px-4 py-3 text-sm text-muted-foreground">
-                            {metric.avgResponseLength}
+                            {metric.level}
                           </td>
                           <td className="px-4 py-3 text-sm text-muted-foreground">
-                            {metric.safetyFlagRate}
+                            {metric.multiplier}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-muted-foreground">
+                            {metric.strengthBand}
                           </td>
                         </tr>
                       ))}
@@ -444,78 +781,91 @@ export default function MetricsPage() {
             <Card className="border-0 shadow-md">
               <CardHeader className="pb-2">
                 <CardTitle className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                  DAILY MODEL REACH
+                  BASELINE VS STEERED BENCHMARK DELTA
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="h-[280px]">
+                <div className="mb-3 flex flex-wrap items-center gap-4 text-xs">
+                  <span className="inline-flex items-center gap-2 text-muted-foreground">
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#5c9ead]" />
+                    baseline model
+                  </span>
+                  <span className="inline-flex items-center gap-2 text-muted-foreground">
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#e07a5f]" />
+                    steered model
+                  </span>
+                  <span className="text-[#1a2634]">
+                    Avg uplift: +
+                    {(
+                      judgeBenchmarkData.reduce((s, d) => s + d.delta, 0) /
+                      Math.max(judgeBenchmarkData.length, 1)
+                    ).toFixed(1)}
+                    pts
+                  </span>
+                </div>
+                <div className="h-[300px]">
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={dailyReachData}>
-                      <defs>
-                        <linearGradient
-                          id="reachGradient"
-                          x1="0"
-                          y1="0"
-                          x2="0"
-                          y2="1"
-                        >
-                          <stop
-                            offset="5%"
-                            stopColor="#f4a68f"
-                            stopOpacity={0.8}
-                          />
-                          <stop
-                            offset="95%"
-                            stopColor="#f4a68f"
-                            stopOpacity={0.1}
-                          />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid
-                        strokeDasharray="3 3"
-                        vertical={false}
+                    <RadarChart
+                      data={judgeBenchmarkData}
+                      cx="50%"
+                      cy="54%"
+                      outerRadius="74%"
+                    >
+                      <PolarGrid
                         stroke="hsl(var(--border))"
+                        radialLines={true}
                       />
-                      <XAxis
-                        dataKey="date"
+                      <PolarAngleAxis
+                        dataKey="metric"
                         tick={{
                           fill: "hsl(var(--muted-foreground))",
-                          fontSize: 10,
+                          fontSize: 12,
                         }}
-                        axisLine={false}
-                        tickLine={false}
-                      />
-                      <YAxis
-                        tick={{
-                          fill: "hsl(var(--muted-foreground))",
-                          fontSize: 11,
-                        }}
-                        axisLine={false}
-                        tickLine={false}
                       />
                       <Tooltip
+                        formatter={(value: number, name: string) => [
+                          `${value} pts`,
+                          name === "steered" ? "Steered" : "Baseline",
+                        ]}
+                        labelFormatter={(label) => `${label}`}
                         contentStyle={{
                           backgroundColor: "hsl(var(--card))",
                           border: "1px solid hsl(var(--border))",
                           borderRadius: "8px",
+                          boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
                         }}
                       />
-                      <Area
-                        type="monotone"
-                        dataKey="reach"
+                      <Radar
+                        name="baseline"
+                        dataKey="baseline"
+                        stroke="#5c9ead"
+                        fill="#5c9ead"
+                        fillOpacity={0.16}
+                        strokeWidth={2}
+                      />
+                      <Radar
+                        name="steered"
+                        dataKey="steered"
                         stroke="#e07a5f"
+                        fill="#e07a5f"
+                        fillOpacity={0.3}
                         strokeWidth={2}
-                        fill="url(#reachGradient)"
                       />
-                      <Line
-                        type="monotone"
-                        dataKey="reach"
-                        stroke="#1a2634"
-                        strokeWidth={2}
-                        dot={{ fill: "#1a2634", strokeWidth: 2, r: 4 }}
-                      />
-                    </AreaChart>
+                    </RadarChart>
                   </ResponsiveContainer>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-5">
+                  {judgeBenchmarkData.map((row) => (
+                    <div
+                      key={row.metric}
+                      className="rounded-md bg-muted/30 p-2"
+                    >
+                      <p className="text-muted-foreground">{row.metric}</p>
+                      <p className="font-semibold text-foreground">
+                        +{row.delta} pts
+                      </p>
+                    </div>
+                  ))}
                 </div>
               </CardContent>
             </Card>
@@ -583,7 +933,7 @@ export default function MetricsPage() {
               </CardContent>
             </Card>
 
-            {/* Scatter Chart - Interactions */}
+            {/* Animated Single-Vector Scaling */}
             <Card className="border-0 shadow-md">
               <CardHeader className="pb-2">
                 <CardTitle className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
@@ -591,80 +941,7 @@ export default function MetricsPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="mb-4 flex gap-4">
-                  <div className="flex items-center gap-2">
-                    <div className="h-3 w-3 rounded-full bg-[#5c9ead]" />
-                    <span className="text-xs text-muted-foreground">
-                      Safety
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="h-3 w-3 rounded-full bg-[#e07a5f]" />
-                    <span className="text-xs text-muted-foreground">
-                      Behavior
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="h-3 w-3 rounded-full bg-[#1a2634]" />
-                    <span className="text-xs text-muted-foreground">
-                      Performance
-                    </span>
-                  </div>
-                </div>
-                <div className="h-[180px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ScatterChart>
-                      <CartesianGrid
-                        strokeDasharray="3 3"
-                        stroke="hsl(var(--border))"
-                      />
-                      <XAxis
-                        type="number"
-                        dataKey="x"
-                        tick={{
-                          fill: "hsl(var(--muted-foreground))",
-                          fontSize: 10,
-                        }}
-                        axisLine={false}
-                        tickLine={false}
-                      />
-                      <YAxis
-                        type="number"
-                        tick={{
-                          fill: "hsl(var(--muted-foreground))",
-                          fontSize: 10,
-                        }}
-                        axisLine={false}
-                        tickLine={false}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: "hsl(var(--card))",
-                          border: "1px solid hsl(var(--border))",
-                          borderRadius: "8px",
-                        }}
-                      />
-                      <Scatter
-                        name="Safety"
-                        data={interactionsData}
-                        dataKey="safety"
-                        fill="#5c9ead"
-                      />
-                      <Scatter
-                        name="Behavior"
-                        data={interactionsData}
-                        dataKey="behavior"
-                        fill="#e07a5f"
-                      />
-                      <Scatter
-                        name="Performance"
-                        data={interactionsData}
-                        dataKey="performance"
-                        fill="#1a2634"
-                      />
-                    </ScatterChart>
-                  </ResponsiveContainer>
-                </div>
+                <VectorScalingAnimation vector={exampleVector} />
               </CardContent>
             </Card>
 

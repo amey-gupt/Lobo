@@ -18,13 +18,10 @@ import { toast } from "sonner";
 interface ChatLog {
   id: string;
   title: string;
-  /** Subtitle in list: session id or placeholder */
-  user: string;
   /** Short time for message bubbles (same moment for both turns in a log row) */
   startedAt: string;
   /** Full timestamp from `created_at` for detail panels */
   createdAtDisplay: string;
-  sessionId: string | null;
   messages: Array<{
     role: "user" | "assistant";
     content: string;
@@ -108,18 +105,11 @@ function mapRowToChatLog(log: Record<string, unknown>): ChatLog {
       ? log.gemini_flagged_at
       : null;
 
-  const sessionId =
-    typeof log.session_id === "string" && log.session_id.trim()
-      ? log.session_id.trim()
-      : null;
-
   return {
     id: String(log.id),
     title: promptPreview,
-    user: sessionId ?? "No session id",
     startedAt: timeStr,
     createdAtDisplay,
-    sessionId,
     messages: [
       {
         role: "user" as const,
@@ -408,8 +398,8 @@ export default function ChatPage() {
                               </Badge>
                             )}
                           </div>
-                          <p className="text-xs text-muted-foreground">
-                            {chat.user}
+                          <p className="text-xs font-mono text-muted-foreground">
+                            #{chat.id}
                           </p>
                         </div>
                         <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -457,17 +447,6 @@ export default function ChatPage() {
                                 Logged at
                               </span>
                               <span className="text-right">{chat.createdAtDisplay}</span>
-                            </div>
-                            <div className="flex flex-wrap items-start justify-between gap-2">
-                              <span className="shrink-0 font-medium text-foreground">
-                                Session id
-                              </span>
-                              <span
-                                className="break-all text-right font-mono text-[11px]"
-                                title={chat.sessionId ?? undefined}
-                              >
-                                {chat.sessionId ?? "—"}
-                              </span>
                             </div>
                             <div className="flex flex-wrap items-baseline justify-between gap-2">
                               <span className="font-medium text-foreground">

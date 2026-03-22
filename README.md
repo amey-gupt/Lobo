@@ -42,7 +42,7 @@ This gives operators a direct runtime control over model behavior without retrai
 - **Steering controls:** Seven concept channels (see below); each maps to a float **multiplier** sent to Modal via **Apply** (`LobotomyAdmin.set_config`).
 - **Floating chat:** Same server route as Cowboy Cafe — `app/api/chat` proxies to `LobotomyInference.generate` with the multipliers currently stored in Modal’s shared config.
 - **Metrics:** A charts-heavy page illustrates baseline vs. steered framing (demo-style visuals).
-- **Chats:** When Supabase is configured, the Chats view lists rows from the `chat_logs` table (prompt, response, multipliers) written by the inference worker.
+- **Chats:** When Supabase is configured, the Chats view lists rows from `chat_logs` (`id`, `prompt`, `response`, `multipliers`, `created_at`, `gemini_flagged_at`, `gemini_result`) written by the inference worker.
 
 To compare **unsteered vs. steered** behavior, set multipliers to zero (or disable channels) and run a prompt, then raise the relevant sliders and **Apply** before asking again — there is not a fixed split-screen “raw vs. steered” pair of generators in the UI.
 

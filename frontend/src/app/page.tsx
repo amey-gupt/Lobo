@@ -45,13 +45,19 @@ interface SteeringVector {
   icon: React.ElementType;
 }
 
+/**
+ * Baseline: all off so Apply sends zeros unless the admin opts in.
+ * (Previously most channels defaulted to On + high levels, so “only one slider” still stacked many steers.)
+ */
+const DEFAULT_LEVEL_ON = 3
+
 const initialVectors: SteeringVector[] = [
   {
     id: "deception",
     actionTitle: "Reduce deception",
     blurb: "Steer away from deceptive patterns.",
-    enabled: true,
-    level: 9,
+    enabled: false,
+    level: 0,
     category: "safety",
     icon: Shield,
   },
@@ -59,8 +65,8 @@ const initialVectors: SteeringVector[] = [
     id: "toxicity",
     actionTitle: "Reduce toxicity",
     blurb: "Push away from toxic language.",
-    enabled: true,
-    level: 10,
+    enabled: false,
+    level: 0,
     category: "safety",
     icon: AlertTriangle,
   },
@@ -68,8 +74,8 @@ const initialVectors: SteeringVector[] = [
     id: "danger",
     actionTitle: "Reduce danger",
     blurb: "Nudge away from harmful content.",
-    enabled: true,
-    level: 10,
+    enabled: false,
+    level: 0,
     category: "safety",
     icon: Skull,
   },
@@ -77,8 +83,8 @@ const initialVectors: SteeringVector[] = [
     id: "happiness",
     actionTitle: "Boost warmth",
     blurb: "Steer toward a warmer tone.",
-    enabled: true,
-    level: 7,
+    enabled: false,
+    level: 0,
     category: "behavior",
     icon: Smile,
   },
@@ -86,8 +92,8 @@ const initialVectors: SteeringVector[] = [
     id: "bias",
     actionTitle: "Reduce bias",
     blurb: "Steer against one-sided framing.",
-    enabled: true,
-    level: 8,
+    enabled: false,
+    level: 0,
     category: "behavior",
     icon: Scale,
   },
@@ -96,7 +102,7 @@ const initialVectors: SteeringVector[] = [
     actionTitle: "Increase formality",
     blurb: "Move toward formal language.",
     enabled: false,
-    level: 6,
+    level: 0,
     category: "behavior",
     icon: FileText,
   },
@@ -104,8 +110,8 @@ const initialVectors: SteeringVector[] = [
     id: "compliance",
     actionTitle: "Boost policy safety",
     blurb: "Nudge toward policy-safe wording.",
-    enabled: true,
-    level: 11,
+    enabled: false,
+    level: 0,
     category: "behavior",
     icon: CheckSquare,
   },
@@ -238,7 +244,14 @@ function SteeringDashboard() {
 
   const toggleVector = (id: string) => {
     setVectors((prev) =>
-      prev.map((v) => (v.id === id ? { ...v, enabled: !v.enabled } : v)),
+      prev.map((v) => {
+        if (v.id !== id) return v;
+        const nextEnabled = !v.enabled;
+        if (nextEnabled && v.level === 0) {
+          return { ...v, enabled: true, level: DEFAULT_LEVEL_ON };
+        }
+        return { ...v, enabled: nextEnabled };
+      }),
     );
   };
 
@@ -276,15 +289,17 @@ function SteeringDashboard() {
     }
   }, [vectors, router]);
 
-  const enabledCount = vectors.filter((v) => v.enabled).length;
-  const enabledList = vectors.filter((v) => v.enabled);
+  const steeringActive = vectors.filter(
+    (v) => steeringLevelToMultiplier(v.enabled, v.level) > 1e-9,
+  );
+  const steeringActiveCount = steeringActive.length;
   const avgMultiplier =
-    enabledList.length === 0
+    steeringActive.length === 0
       ? 0
-      : enabledList.reduce(
+      : steeringActive.reduce(
           (sum, v) => sum + steeringLevelToMultiplier(v.enabled, v.level),
           0,
-        ) / enabledList.length;
+        ) / steeringActive.length;
   const peakMultiplier = Math.max(
     0,
     ...vectors.map((v) => steeringLevelToMultiplier(v.enabled, v.level)),
@@ -321,11 +336,11 @@ function SteeringDashboard() {
                     <Shield className="h-6 w-6" />
                   </div>
                   <p className="text-sm font-medium opacity-90">
-                    Controls turned on
+                    Non-zero steers
                   </p>
-                  <p className="text-3xl font-bold">{enabledCount}</p>
+                  <p className="text-3xl font-bold">{steeringActiveCount}</p>
                   <p className="mt-2 text-center text-xs opacity-80">
-                    How many controls are active right now
+                    Channels sending × &gt; 0 (turn others Off to test one)
                   </p>
                 </CardContent>
               </Card>
@@ -342,7 +357,7 @@ function SteeringDashboard() {
                     {avgMultiplier.toFixed(2)}×
                   </p>
                   <p className="mt-2 text-center text-xs opacity-80">
-                    The typical level across active controls
+                    Mean × among non-zero channels only
                   </p>
                 </CardContent>
               </Card>
@@ -376,10 +391,16 @@ function SteeringDashboard() {
                 <div className="flex h-10 overflow-hidden rounded-lg">
                   {categories.map((cat) => {
                     const catVectors = vectors.filter(
-                      (v) => v.category === cat && v.enabled,
+                      (v) =>
+                        v.category === cat &&
+                        steeringLevelToMultiplier(v.enabled, v.level) > 1e-9,
                     );
                     const percentage =
-                      Math.round((catVectors.length / enabledCount) * 100) || 0;
+                      steeringActiveCount === 0
+                        ? 0
+                        : Math.round(
+                            (catVectors.length / steeringActiveCount) * 100,
+                          ) || 0;
                     return (
                       <div
                         key={cat}
@@ -432,7 +453,12 @@ function SteeringDashboard() {
                   <span className="font-medium text-foreground">
                     hurt fluency
                   </span>{" "}
-                  or make outputs worse.
+                  or make outputs worse.{" "}
+                  <span className="font-medium text-foreground">
+                    Turn Off every direction you are not testing
+                  </span>
+                  —leaving many switches On stacks steering and often causes
+                  garbled text, even if only one slider looks “turned up.”
                 </p>
               </CardContent>
             </Card>

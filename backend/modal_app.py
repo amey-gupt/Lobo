@@ -20,6 +20,21 @@ config_store = modal.Dict.from_name("lobo-config", create_if_missing=True)
 DEFAULT_MULTIPLIERS = {c: 0.0 for c in CONCEPTS}
 
 
+def _normalize_multipliers(m: Optional[Dict]) -> Dict[str, float]:
+    """Full CONCEPTS dict; unknown keys ignored. Survives partial/stale Modal dicts."""
+    out = {c: 0.0 for c in CONCEPTS}
+    if not m:
+        return out
+    for k, v in m.items():
+        if k not in out:
+            continue
+        try:
+            out[k] = float(v)
+        except (TypeError, ValueError):
+            out[k] = 0.0
+    return out
+
+
 def _admin_bearer_ok(authorization_header: str) -> bool:
     """Validate Authorization: Bearer <ADMIN_TOKEN> from Modal secret ``admin-secret``."""
     token = (os.environ.get("ADMIN_TOKEN") or "").strip()
@@ -82,8 +97,9 @@ class LobotomyAdmin:
         # Use Header() — not a bare `request` param — or FastAPI treats `request` as a query field (422).
         if not _admin_bearer_ok(authorization or ""):
             raise HTTPException(status_code=401, detail="Unauthorized")
-        config_store["multipliers"] = body.multipliers
-        return {"status": "ok", "multipliers": body.multipliers}
+        normalized = _normalize_multipliers(body.multipliers)
+        config_store["multipliers"] = normalized
+        return {"status": "ok", "multipliers": normalized}
 
     @modal.fastapi_endpoint(method="GET")
     def get_config(
@@ -92,7 +108,7 @@ class LobotomyAdmin:
     ):
         if not _admin_bearer_ok(authorization or ""):
             raise HTTPException(status_code=401, detail="Unauthorized")
-        return config_store.get("multipliers", DEFAULT_MULTIPLIERS)
+        return _normalize_multipliers(config_store.get("multipliers"))
 
 
 @app.cls(
@@ -149,16 +165,29 @@ class LobotomyInference:
     def _build_steering_vector(self, multipliers):
         import torch
 
+        # A/B: set STEERING_DISABLED=1 on Modal to confirm outputs without steering (same prompt).
+        if (os.environ.get("STEERING_DISABLED") or "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        ):
+            return torch.zeros_like(next(iter(self.steering_vectors.values())))
+
         # Sum_i multiplier_i * v_i  with each v_i unit-norm; apply: h ← h − total
         # (v_i from compute_vectors = toxic_mean − safe_mean → subtracting reduces toxic direction).
         total = torch.zeros_like(next(iter(self.steering_vectors.values())))
         for concept, multiplier in multipliers.items():
             if multiplier != 0.0 and concept in self.steering_vectors:
                 total = total + (multiplier * self.steering_vectors[concept])
-        # Cap combined step so extreme sliders don't obliterate activations
+
+        # TLens vs HF mismatch: raw multipliers can act like noise. Damp + cap combined L2.
+        # Tune via Modal env without redeploying vectors: STEERING_GLOBAL_SCALE, STEERING_COMBINED_L2_CAP.
+        scale = float(os.environ.get("STEERING_GLOBAL_SCALE") or "0.25")
+        cap = float(os.environ.get("STEERING_COMBINED_L2_CAP") or "2.5")
+        total = total * scale
         tn = total.norm()
-        if tn > 1e-6 and tn > 8.0:
-            total = total * (8.0 / tn)
+        if tn > 1e-6 and tn > cap:
+            total = total * (cap / tn)
         return total
 
     @modal.fastapi_endpoint(method="POST")
@@ -166,15 +195,18 @@ class LobotomyInference:
         """Public prompt endpoint — multipliers come from admin ``config_store``."""
         import torch
 
-        multipliers = config_store.get("multipliers", DEFAULT_MULTIPLIERS)
+        multipliers = _normalize_multipliers(config_store.get("multipliers"))
         steering_vector = self._build_steering_vector(multipliers).view(1, 1, -1)
+        use_steering = float(steering_vector.norm().item()) > 1e-6
 
         def pre_hook(module, inputs):
             hidden_states = inputs[0] - steering_vector
             return (hidden_states, *inputs[1:])
 
         target_layer = self.model.model.layers[self.steering_layer]
-        hook_handle = target_layer.register_forward_pre_hook(pre_hook)
+        hook_handle = (
+            target_layer.register_forward_pre_hook(pre_hook) if use_steering else None
+        )
         try:
             model_inputs = self.tokenizer(request.prompt, return_tensors="pt").to("cuda")
             input_len = model_inputs["input_ids"].shape[1]
@@ -187,7 +219,8 @@ class LobotomyInference:
                 no_repeat_ngram_size=3,
             )
         finally:
-            hook_handle.remove()
+            if hook_handle is not None:
+                hook_handle.remove()
 
         # Decode ONLY new tokens — full-sequence decode repeats the entire prompt in the response.
         new_tokens = output_tokens[0][input_len:]

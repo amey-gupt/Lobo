@@ -102,6 +102,8 @@ Two Modal **classes** share one `modal.Dict` (`lobo-config`) for steering multip
 Admin routes require **`Authorization: Bearer <ADMIN_TOKEN>`** (from Modal secret `admin-secret`).  
 Customer `generate` only sends `{ "prompt": "..." }`; multipliers come from the last admin `set_config`.
 
+If steering still breaks generation (garbled text), see `backend/STEERING.md` — tune **`STEERING_GLOBAL_SCALE`** / **`STEERING_COMBINED_L2_CAP`** on Modal, or **`STEERING_DISABLED=true`** to verify the unstopped model.
+
 ---
 
 ## API

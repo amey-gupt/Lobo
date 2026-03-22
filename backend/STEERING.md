@@ -34,6 +34,16 @@ So **increasing the multiplier is supposed to decrease** the targeted harmful co
 - Prefer **moderate** multipliers (e.g. **0.5–3**) first; increase only if the effect is too weak.
 - For a trustworthy demo, recompute vectors using the **same** runtime as inference (HF + same hook tensor), or verify alignment between TLens and HF for your checkpoint.
 
+## Inference-time damping (Modal env)
+
+If **any** non-zero steering still produces garbage (random tokens / Unicode noise), the vector is likely **misaligned** with the HF residual. `modal_app.py` applies extra safety:
+
+- **`STEERING_GLOBAL_SCALE`** (default `0.25`) — multiplies the combined steering vector **before** the L2 cap. Effective strength is `slider × scale` in spirit; increase toward `1.0` only after vectors match HF.
+- **`STEERING_COMBINED_L2_CAP`** (default `2.5`) — max L2 norm of the **scaled** combined vector (was `8.0`).
+- **`STEERING_DISABLED`** — set to `1` / `true` to **skip steering** entirely and confirm the base model + prompt are healthy on Modal.
+
+Set these on the **LobotomyInference** Modal deployment (secrets or env), redeploy, then retry.
+
 ## Cowboy Cafe UI
 
 Messy “In character as…”, “Customer:…”, refusals, and hotwire steps are mostly **base model + prompt** behavior, not the steering math. Use `COWBOY_CAFE_HACKATHON_BASELINE` and sanitization on the Next route; treat **steering** as the scientific knob on Modal.

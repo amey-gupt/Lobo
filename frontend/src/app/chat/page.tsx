@@ -6,8 +6,7 @@ import { DashboardHeader } from "@/components/dashboard-header";
 import { ChatPanel } from "@/components/chat-panel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { MessageCircle, Clock3, ShieldAlert, Info } from "lucide-react";
+import { MessageCircle, Clock3, Info } from "lucide-react";
 import { supabase } from "@/lib/supabase-client";
 
 interface ChatLog {
@@ -15,7 +14,6 @@ interface ChatLog {
   title: string;
   user: string;
   startedAt: string;
-  risk: "Low" | "Medium" | "High";
   messages: Array<{
     role: "user" | "assistant";
     content: string;
@@ -26,16 +24,23 @@ interface ChatLog {
     vectorProfile: string;
     safetyFlags: string[];
     summary: string;
+    multipliers?: Record<string, number>;
   };
 }
 
-
-
-function riskBadgeClass(risk: ChatLog["risk"]) {
-  if (risk === "High") return "bg-[#e07a5f] text-white";
-  if (risk === "Medium") return "bg-[#f2cc8f] text-[#1a2634]";
-  return "bg-[#81b29a] text-white";
+function formatMultipliers(multipliers: Record<string, number> | undefined) {
+  if (!multipliers) return [];
+  return Object.entries(multipliers)
+    .filter(([_, value]) => value !== 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([key, value]) => ({
+      name: key.charAt(0).toUpperCase() + key.slice(1),
+      value: value.toFixed(2),
+    }));
 }
+
+
+
 
 export default function ChatPage() {
   const [chatLogs, setChatLogs] = useState<ChatLog[]>([]);
@@ -64,13 +69,13 @@ export default function ChatPage() {
             minute: "2-digit",
           });
           const promptPreview = log.prompt?.substring(0, 50) || "Untitled";
+          const multipliers = typeof log.multipliers === "string" ? JSON.parse(log.multipliers) : log.multipliers;
 
           return {
             id: log.id,
             title: promptPreview,
             user: log.session_id || "User",
             startedAt: timeStr,
-            risk: "Low" as const,
             messages: [
               {
                 role: "user" as const,
@@ -87,7 +92,8 @@ export default function ChatPage() {
               model: "dolphin-2.9-llama3-8b",
               vectorProfile: "default",
               safetyFlags: [],
-              summary: log.multipliers ? `Multipliers: ${JSON.stringify(log.multipliers)}` : "No multipliers",
+              summary: "Steering Multipliers",
+              multipliers: multipliers || {},
             },
           };
         });
@@ -183,18 +189,13 @@ export default function ChatPage() {
                         onClick={() => setSelectedId(chat.id)}
                         className="w-full text-left"
                       >
-                        <div className="mb-2 flex items-start justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-semibold text-foreground">
-                              {chat.title}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              {chat.user}
-                            </p>
-                          </div>
-                          <Badge className={riskBadgeClass(chat.risk)}>
-                            {chat.risk}
-                          </Badge>
+                        <div className="mb-2 flex flex-col gap-1">
+                          <p className="text-sm font-semibold text-foreground">
+                            {chat.title}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {chat.user}
+                          </p>
                         </div>
                         <div className="flex items-center gap-1 text-xs text-muted-foreground">
                           <Clock3 className="h-3 w-3" />
@@ -217,19 +218,9 @@ export default function ChatPage() {
 
                       {showDetails && (
                         <div className="mt-3 rounded-lg bg-muted/60 p-3 text-xs text-muted-foreground">
-                          <p className="mb-1 text-foreground">
-                            <span className="font-medium">Model:</span>{" "}
-                            {chat.details.model}
-                          </p>
-                          <p className="mb-1 text-foreground">
-                            <span className="font-medium">Profile:</span>{" "}
-                            {chat.details.vectorProfile}
-                          </p>
-                          <p>
-                            <span className="font-medium text-foreground">
-                              Safety flags:
-                            </span>{" "}
-                            {chat.details.safetyFlags.join(", ")}
+                          <p className="text-foreground">
+                            <span className="font-medium">Multipliers:</span>{" "}
+                            {chat.details.summary}
                           </p>
                         </div>
                       )}
@@ -241,54 +232,61 @@ export default function ChatPage() {
 
             <Card className="border-0 shadow-md">
               <CardHeader className="border-b border-border/60">
-                <CardTitle className="flex items-center justify-between text-sm">
-                  <span>{selected.title}</span>
-                  <Badge className={riskBadgeClass(selected.risk)}>
-                    {selected.risk}
-                  </Badge>
+                <CardTitle className="text-sm">
+                  {selected?.title}
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4 p-4">
-                {selected.messages.map((msg, idx) => (
-                  <div
-                    key={`${selected.id}-${idx}`}
-                    className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-                  >
-                    <div
-                      className={`max-w-[85%] rounded-2xl px-4 py-2 text-sm ${
-                        msg.role === "user"
-                          ? "bg-[#2b4162] text-white"
-                          : "bg-muted text-foreground"
-                      }`}
-                    >
-                      <p>{msg.content}</p>
-                      <p
-                        className={`mt-1 text-[11px] ${
-                          msg.role === "user"
-                            ? "text-white/60"
-                            : "text-muted-foreground"
-                        }`}
+                {selected ? (
+                  <>
+                    {selected.messages.map((msg, idx) => (
+                      <div
+                        key={`${selected.id}-${idx}`}
+                        className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
                       >
-                        {msg.time}
-                      </p>
-                    </div>
-                  </div>
-                ))}
+                        <div
+                          className={`max-w-[85%] rounded-2xl px-4 py-2 text-sm ${
+                            msg.role === "user"
+                              ? "bg-[#2b4162] text-white"
+                              : "bg-muted text-foreground"
+                          }`}
+                        >
+                          <p>{msg.content}</p>
+                          <p
+                            className={`mt-1 text-[11px] ${
+                              msg.role === "user"
+                                ? "text-white/60"
+                                : "text-muted-foreground"
+                            }`}
+                          >
+                            {msg.time}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
 
-                <div className="rounded-xl bg-[#f4a68f]/25 p-4 text-sm text-[#1a2634]">
-                  <div className="mb-2 flex items-center gap-2 font-semibold">
-                    <Info className="h-4 w-4" />
-                    Chat Details
-                  </div>
-                  <p className="mb-2">{selected.details.summary}</p>
-                  <div className="flex items-center gap-2 text-xs">
-                    <ShieldAlert className="h-3.5 w-3.5" />
-                    <span>
-                      Current safety flags:{" "}
-                      {selected.details.safetyFlags.join(", ")}
-                    </span>
-                  </div>
-                </div>
+                    <div className="rounded-xl bg-[#f4a68f]/25 p-4 text-sm text-[#1a2634]">
+                      <div className="mb-3 flex items-center gap-2 font-semibold">
+                        <Info className="h-4 w-4" />
+                        Steering Multipliers
+                      </div>
+                      <div className="space-y-1.5">
+                        {formatMultipliers(selected.details.multipliers).length > 0 ? (
+                          formatMultipliers(selected.details.multipliers).map((m) => (
+                            <div key={m.name} className="flex justify-between items-center text-xs">
+                              <span className="text-[#1a2634]/80">{m.name}</span>
+                              <span className="font-semibold text-[#1a2634]">{m.value}×</span>
+                            </div>
+                          ))
+                        ) : (
+                          <p className="text-xs text-[#1a2634]/60">No active multipliers</p>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-muted-foreground">Select a chat to view details</p>
+                )}
               </CardContent>
             </Card>
           </div>

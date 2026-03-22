@@ -1,62 +1,64 @@
-"use client"
+"use client";
 
-import { useState, useRef, useEffect } from "react"
-import { useChat } from "@ai-sdk/react"
-import { DefaultChatTransport } from "ai"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { MessageCircle, X, Send, Bot, User, Loader2 } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { useState, useRef, useEffect } from "react";
+import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "ai";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { MessageCircle, X, Send, Bot, User, Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 /**
  * Same transport + `/api/chat` behavior as Cowboy Cafe — tests the customer-facing Modal
  * pipeline (LobotomyInference + steering from admin sliders).
  */
 export function ChatPanel() {
-  const [isOpen, setIsOpen] = useState(false)
-  const [input, setInput] = useState("")
-  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [isOpen, setIsOpen] = useState(false);
+  const [input, setInput] = useState("");
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const { messages, sendMessage, status, error } = useChat({
     transport: new DefaultChatTransport({ api: "/api/chat" }),
-  })
+  });
 
-  const isLoading = status === "streaming" || status === "submitted"
+  const isLoading = status === "streaming" || status === "submitted";
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
 
   useEffect(() => {
-    scrollToBottom()
-  }, [messages, isLoading])
+    scrollToBottom();
+  }, [messages, isLoading]);
 
   const handleSend = () => {
-    if (!input.trim() || isLoading) return
-    sendMessage({ text: input })
-    setInput("")
-  }
+    if (!input.trim() || isLoading) return;
+    sendMessage({ text: input });
+    setInput("");
+  };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault()
-      handleSend()
+      e.preventDefault();
+      handleSend();
     }
-  }
+  };
 
   const suggestedQuestions = [
     "What's your best coffee?",
     "Do you have vegetarian options?",
     "What are your hours?",
     "Tell me about specials",
-  ]
+  ];
 
   return (
     <>
       <button
         onClick={() => setIsOpen(true)}
         className={`fixed bottom-6 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-[#e07a5f] text-white shadow-lg transition-all hover:scale-105 hover:bg-[#d06a4f] hover:shadow-xl ${
-          isOpen ? "pointer-events-none scale-0 opacity-0" : "scale-100 opacity-100"
+          isOpen
+            ? "pointer-events-none scale-0 opacity-0"
+            : "scale-100 opacity-100"
         }`}
         aria-label="Open chat"
         type="button"
@@ -66,7 +68,9 @@ export function ChatPanel() {
 
       <div
         className={`fixed bottom-6 right-6 z-50 flex h-[500px] w-[380px] flex-col overflow-hidden rounded-2xl border-0 bg-card shadow-2xl transition-all duration-300 ${
-          isOpen ? "scale-100 opacity-100" : "pointer-events-none scale-95 opacity-0"
+          isOpen
+            ? "scale-100 opacity-100"
+            : "pointer-events-none scale-95 opacity-0"
         }`}
       >
         <div className="flex items-center justify-between bg-[#1a2634] px-4 py-3 text-white">
@@ -76,7 +80,9 @@ export function ChatPanel() {
             </div>
             <div>
               <p className="font-semibold">Lobo · Cowboy Cafe test</p>
-              <p className="text-xs text-white/60">Same API as customer chat + steering</p>
+              <p className="text-xs text-white/60">
+                Same API as customer chat + steering
+              </p>
             </div>
           </div>
           <Button
@@ -97,10 +103,14 @@ export function ChatPanel() {
                 <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-[#e07a5f]/15">
                   <MessageCircle className="h-7 w-7 text-[#e07a5f]" />
                 </div>
-                <h4 className="mb-1 font-semibold text-foreground">Howdy, partner</h4>
+                <h4 className="mb-1 font-semibold text-foreground">
+                  Howdy, partner
+                </h4>
                 <p className="mb-4 max-w-[280px] text-xs text-muted-foreground">
-                  This panel calls the same <span className="font-medium">/api/chat</span> route as Cowboy Cafe
-                  (Modal generate + your steering config). Use it to preview what customers see.
+                  This panel calls the same{" "}
+                  <span className="font-medium">/api/chat</span> route as Cowboy
+                  Cafe (Modal generate + your steering config). Use it to
+                  preview what customers see.
                 </p>
                 <div className="grid w-full max-w-[300px] grid-cols-2 gap-2">
                   {suggestedQuestions.map((question, index) => (
@@ -110,7 +120,7 @@ export function ChatPanel() {
                       size="sm"
                       type="button"
                       disabled={isLoading}
-                      className="h-auto justify-start px-3 py-2 text-left text-xs"
+                      className="h-auto min-w-0 justify-start whitespace-normal break-words px-3 py-2 text-left text-xs leading-snug"
                       onClick={() => sendMessage({ text: question })}
                     >
                       {question}
@@ -125,13 +135,15 @@ export function ChatPanel() {
                     key={message.id}
                     className={cn(
                       "flex gap-3",
-                      message.role === "user" ? "flex-row-reverse" : "flex-row"
+                      message.role === "user" ? "flex-row-reverse" : "flex-row",
                     )}
                   >
                     <div
                       className={cn(
                         "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white",
-                        message.role === "user" ? "bg-[#2b4162]" : "bg-[#e07a5f]"
+                        message.role === "user"
+                          ? "bg-[#2b4162]"
+                          : "bg-[#e07a5f]",
                       )}
                     >
                       {message.role === "user" ? (
@@ -145,32 +157,36 @@ export function ChatPanel() {
                         "max-w-[75%] rounded-2xl px-4 py-2.5",
                         message.role === "user"
                           ? "bg-[#2b4162] text-white"
-                          : "bg-muted text-foreground"
+                          : "bg-muted text-foreground",
                       )}
                     >
                       {message.parts.map((part, index) => {
                         if (part.type === "text") {
                           return (
-                            <p key={index} className="text-sm leading-relaxed whitespace-pre-wrap">
+                            <p
+                              key={index}
+                              className="text-sm leading-relaxed whitespace-pre-wrap"
+                            >
                               {part.text}
                             </p>
-                          )
+                          );
                         }
-                        return null
+                        return null;
                       })}
                     </div>
                   </div>
                 ))}
-                {isLoading && messages[messages.length - 1]?.role === "user" && (
-                  <div className="flex gap-3">
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#e07a5f] text-white">
-                      <Bot className="h-4 w-4" />
+                {isLoading &&
+                  messages[messages.length - 1]?.role === "user" && (
+                    <div className="flex gap-3">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#e07a5f] text-white">
+                        <Bot className="h-4 w-4" />
+                      </div>
+                      <div className="rounded-2xl bg-muted px-4 py-3">
+                        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                      </div>
                     </div>
-                    <div className="rounded-2xl bg-muted px-4 py-3">
-                      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                    </div>
-                  </div>
-                )}
+                  )}
                 {error && (
                   <p className="rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
                     {error.message}
@@ -205,5 +221,5 @@ export function ChatPanel() {
         </div>
       </div>
     </>
-  )
+  );
 }

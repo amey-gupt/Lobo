@@ -96,7 +96,7 @@ export function ChatBot({ isOpen, onClose }: ChatBotProps) {
                     key={index}
                     variant="outline"
                     size="sm"
-                    className="text-xs h-auto py-2 px-3 text-left justify-start border-border hover:bg-secondary hover:text-secondary-foreground"
+                    className="text-xs h-auto min-w-0 justify-start whitespace-normal break-words py-2 px-3 text-left leading-snug border-border hover:bg-secondary hover:text-secondary-foreground"
                     onClick={() => {
                       sendMessage({ text: question })
                     }}

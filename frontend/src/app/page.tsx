@@ -1,7 +1,6 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { useUser } from "@auth0/nextjs-auth0/client"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { DashboardSidebar } from "@/components/dashboard-sidebar"
@@ -149,30 +148,50 @@ function mergeVectorsFromMultipliers(
 
 function SteeringDashboard() {
   const router = useRouter()
-  const { user, isLoading } = useUser()
   const [vectors, setVectors] = useState<SteeringVector[]>(initialVectors)
   const [configLoading, setConfigLoading] = useState(true)
   const [applyLoading, setApplyLoading] = useState(false)
 
   useEffect(() => {
     let cancelled = false
+    const debug = process.env.NODE_ENV === "development"
     ;(async () => {
+      if (debug) {
+        console.log("[Lobo admin] GET /api/admin/config → fetching (Modal config hydrate)")
+      }
       try {
         const res = await fetch("/api/admin/config", { cache: "no-store" })
         const data = await res.json()
-        if (cancelled) return
+        if (cancelled) {
+          if (debug) console.log("[Lobo admin] GET /api/admin/config → aborted (unmounted)")
+          return
+        }
+        if (debug) {
+          console.log("[Lobo admin] GET /api/admin/config ← response", {
+            ok: res.ok,
+            status: res.status,
+            statusText: res.statusText,
+          })
+        }
         if (!res.ok) {
           const msg =
             typeof data?.error === "string"
               ? data.error
               : `Could not load config (${res.status})`
+          console.warn("[Lobo admin] GET /api/admin/config failed", { status: res.status, body: data })
           toast.error(msg)
           return
         }
         const multipliers = parseMultipliersFromApi(data)
+        if (debug) {
+          console.log("[Lobo admin] GET /api/admin/config ← parsed multipliers (UI will merge)", multipliers)
+        }
         setVectors((prev) => mergeVectorsFromMultipliers(prev, multipliers))
-      } catch {
-        if (!cancelled) toast.error("Failed to reach admin config API")
+      } catch (err) {
+        if (!cancelled) {
+          console.error("[Lobo admin] GET /api/admin/config → network or parse error", err)
+          toast.error("Failed to reach admin config API")
+        }
       } finally {
         if (!cancelled) setConfigLoading(false)
       }
@@ -194,7 +213,7 @@ function SteeringDashboard() {
     )
   }
 
-  const handleSubmit = useCallback(async () => { // eslint-disable-line react-hooks/exhaustive-deps
+  const handleSubmit = useCallback(async () => {
     setApplyLoading(true)
     try {
       const multipliers = buildMultipliersPayload(vectors)
@@ -223,19 +242,6 @@ function SteeringDashboard() {
       setApplyLoading(false)
     }
   }, [vectors, router])
-
-  if (isLoading) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
-
-  if (!user) return (
-    <div className="flex min-h-screen items-center justify-center">
-      <div className="text-center">
-        <h1 className="mb-4 text-2xl font-bold">Lobo Admin</h1>
-        <a href="/auth/login" className="rounded-lg bg-[#e07a5f] px-6 py-3 text-white hover:bg-[#d06a4f]">
-          Login
-        </a>
-      </div>
-    </div>
-  )
 
   const enabledCount = vectors.filter((v) => v.enabled).length
   const avgIntensity = Math.round(

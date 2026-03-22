@@ -141,7 +141,7 @@ export function ChatPanel() {
                   This panel calls the same <span className="font-medium">/api/chat</span> route as Cowboy Cafe
                   (Modal generate + your steering config). Use it to preview what customers see.
                 </p>
-                <div className="grid w-full max-w-[300px] grid-cols-2 gap-2">
+                <div className="grid w-full max-w-[320px] grid-cols-1 gap-2">
                   {suggestedQuestions.map((question, index) => (
                     <Button
                       key={index}
@@ -149,7 +149,7 @@ export function ChatPanel() {
                       size="sm"
                       type="button"
                       disabled={isLoading}
-                      className="h-auto justify-start px-3 py-2 text-left text-xs"
+                      className="h-auto w-full justify-start whitespace-normal break-words px-3 py-2.5 text-left text-xs leading-snug"
                       onClick={() => sendMessage({ text: question })}
                     >
                       {question}

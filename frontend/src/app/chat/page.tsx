@@ -221,52 +221,6 @@ export default function ChatPage() {
     };
   }, [loadChatLogs]);
 
-  /** Re-run Gemini flags only (no new Modal generation). */
-  const rerunGeminiForLog = useCallback(async (log: ChatLog) => {
-    setChatLogs((prev) =>
-      prev.map((c) =>
-        c.id === log.id ? { ...c, geminiFlagging: true } : c
-      )
-    );
-    try {
-      const res = await fetch("/api/flag-chat-log", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: log.id }),
-      });
-      const data = (await res.json()) as { result?: GeminiResultV1 };
-      if (res.ok && data.result) {
-        setChatLogs((prev) =>
-          prev.map((c) =>
-            c.id === log.id
-              ? {
-                  ...c,
-                  geminiResult: data.result ?? null,
-                  geminiFlagging: false,
-                  geminiFlaggedAt: new Date().toISOString(),
-                }
-              : c
-          )
-        );
-        toast.success("Gemini evaluation updated");
-      } else {
-        setChatLogs((prev) =>
-          prev.map((c) =>
-            c.id === log.id ? { ...c, geminiFlagging: false } : c
-          )
-        );
-        toast.error("Could not re-run Gemini");
-      }
-    } catch {
-      setChatLogs((prev) =>
-        prev.map((c) =>
-          c.id === log.id ? { ...c, geminiFlagging: false } : c
-        )
-      );
-      toast.error("Could not re-run Gemini");
-    }
-  }, []);
-
   /**
    * Opens the floating admin chat, clears it, and sends the log’s user prompt
    * (same as a new customer message → new `chat_logs` row via Modal).
@@ -340,7 +294,7 @@ export default function ChatPage() {
             </h2>
             <p className="text-sm text-muted-foreground">
               Logs sync from Supabase; Gemini concept flags are written after each Modal
-              generation (or re-run below). Enable Realtime on{" "}
+              generation. Enable Realtime on{" "}
               <code className="text-xs">chat_logs</code> in Supabase for live updates.
             </p>
           </section>
@@ -516,25 +470,14 @@ export default function ChatPage() {
               <CardHeader className="border-b border-border/60">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <CardTitle className="text-sm">{selected.title}</CardTitle>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      variant="default"
-                      type="button"
-                      onClick={() => replayPromptInAdminChat(selected)}
-                    >
-                      Re-evaluate
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      type="button"
-                      disabled={selected.geminiFlagging}
-                      onClick={() => void rerunGeminiForLog(selected)}
-                    >
-                      Re-run Gemini
-                    </Button>
-                  </div>
+                  <Button
+                    size="sm"
+                    variant="default"
+                    type="button"
+                    onClick={() => replayPromptInAdminChat(selected)}
+                  >
+                    Re-evaluate
+                  </Button>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4 p-4">
@@ -583,7 +526,7 @@ export default function ChatPage() {
                   <div className="rounded-xl border border-border bg-muted/30 p-4 text-sm">
                     <div className="mb-2 flex items-center gap-2 font-semibold text-foreground">
                       <Info className="h-4 w-4" />
-                      Gemini concept flags
+                      Concept Flags
                     </div>
                     <div className="mb-3 grid gap-1.5 sm:grid-cols-2">
                       {CONCEPT_IDS.map((id: ConceptId) => (

@@ -28,6 +28,7 @@ import {
   CartesianGrid,
   PolarAngleAxis,
   PolarGrid,
+  PolarRadiusAxis,
   Radar,
   RadarChart,
   ResponsiveContainer,
@@ -744,20 +745,14 @@ export default function MetricsPage() {
                         tickLine={false}
                       />
                       <YAxis
+                        domain={[0, 100]}
+                        allowDecimals={false}
                         tick={{
                           fill: "hsl(var(--muted-foreground))",
                           fontSize: 11,
                         }}
                         axisLine={false}
                         tickLine={false}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: "hsl(var(--card))",
-                          border: "1px solid hsl(var(--border))",
-                          borderRadius: "8px",
-                          boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-                        }}
                       />
                       <Bar
                         dataKey="safety"
@@ -819,6 +814,11 @@ export default function MetricsPage() {
                           fill: "hsl(var(--muted-foreground))",
                           fontSize: 12,
                         }}
+                      />
+                      <PolarRadiusAxis
+                        domain={[0, 100]}
+                        tick={false}
+                        axisLine={false}
                       />
                       <Tooltip
                         formatter={(value: number, name: string) => [

@@ -424,7 +424,7 @@ function SteeringDashboard() {
                 <p className="mx-auto max-w-3xl text-center text-sm leading-relaxed text-muted-foreground">
                   Each control sets a{" "}
                   <span className="font-medium text-foreground">
-                    coefficient (×)
+                    coefficient
                   </span>{" "}
                   on a learned direction—not a literal “percent of concept” in
                   the text. Stronger steering nudges the model; it does not
@@ -514,7 +514,7 @@ function SteeringDashboard() {
                                   Max (risky)
                                 </span>
                               </div>
-                              <div className="flex flex-wrap items-center gap-3">
+                              <div className="flex items-center gap-3">
                                 <Slider
                                   value={[vector.level]}
                                   onValueChange={([val]) =>
@@ -525,18 +525,19 @@ function SteeringDashboard() {
                                   className="min-w-[120px] flex-1"
                                   aria-valuetext={`${label}, ${mult}`}
                                 />
-                                <div className="flex min-w-[8.5rem] flex-col items-end text-right">
+                                <div className="flex w-[2.5rem] flex-col items-end text-right">
                                   <span className="text-lg font-semibold tabular-nums text-foreground">
                                     {mult}
                                   </span>
-                                  <span
-                                    className={`text-xs ${highLoad ? "font-medium text-amber-700 dark:text-amber-400" : "text-muted-foreground"}`}
-                                  >
-                                    {label}
-                                    {highLoad ? " · may garble" : ""}
-                                  </span>
                                 </div>
                               </div>
+                              {highLoad && (
+                                <div className="text-right">
+                                  <span className="text-xs font-medium text-amber-700 dark:text-amber-400">
+                                    {label} · may garble
+                                  </span>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>

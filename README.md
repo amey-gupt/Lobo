@@ -1,4 +1,4 @@
-# Lobotomy (Lobo)
+# Lobotomy (Lobo) 
 ## Real-Time Inference Firewall for LLM Safety
 
 Lobotomy is an AI safety system that enforces behavior at inference-time by modifying model internals, not just prompt text.  
@@ -84,6 +84,7 @@ Lobo/
 │   └── steering_vectors/      # Baked .pt vectors (Volume overrides when present)
 ├── cowboy_cafe/               # Next.js marketing site; chat → Modal via app/api/chat
 ├── frontend/src/              # Next.js admin dashboard (package.json lives here)
+├── supabase/migrations/       # SQL for optional chat_logs / Gemini flag columns
 ├── requirements.txt           # Local Python deps (Modal scripts, tooling)
 └── README.md
 ```
@@ -192,7 +193,7 @@ pip install -r requirements.txt
 - **`huggingface-secret`** — Hugging Face token for model download.
 - **`MODEL_ID`** — env secret with `MODEL_ID=cognitivecomputations/dolphin-2.9-llama3-8b` (or your model id).
 - **`admin-secret`** — `ADMIN_TOKEN=<long random secret>` for Bearer auth on admin endpoints.
-- **`supabase-secret`** — `SUPABASE_URL` plus **`SUPABASE_KEY`** *or* **`SUPABASE_SERVICE_ROLE_KEY`** (same service-role JWT as in Next `.env.local`). If you only set the latter name, older deploys ignored it and inserts silently failed — redeploy after pulling latest `modal_app.py`. Add columns `gemini_result` (json/jsonb) and `gemini_flagged_at` (timestamptz) for per-concept Gemini flags.
+- **`supabase-secret`** — `SUPABASE_URL` plus **`SUPABASE_KEY`** *or* **`SUPABASE_SERVICE_ROLE_KEY`** (same service-role JWT as in Next `.env.local`). If you only set the latter name, older deploys ignored it and inserts silently failed — redeploy after pulling latest `modal_app.py`. Add columns `gemini_result` (json/jsonb) and `gemini_flagged_at` (timestamptz) for per-concept Gemini flags. Example SQL lives in `supabase/migrations/`.
 - **`gemini-secret`** — `GEMINI_API_KEY=<Google AI Studio key>` for the background function `evaluate_chat_log_gemini` (runs after each `chat_logs` insert). Optional model override: `GEMINI_EVAL_MODEL=gemini-2.5-flash` (older IDs like `gemini-2.0-flash` may return 404 for new keys).
 
 ```bash

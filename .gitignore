@@ -4,7 +4,11 @@
 venv/
 __pycache__/
 *.py[cod]
+.pytest_cache/
 .DS_Store
 Thumbs.db
 node_modules/
 frontend/node_modules/
+.next/
+cowboy_cafe/.next/
+frontend/src/.next/

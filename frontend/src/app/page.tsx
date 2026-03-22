@@ -1,7 +1,8 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { toast } from "sonner"
 import { DashboardSidebar } from "@/components/dashboard-sidebar"
 import { DashboardHeader } from "@/components/dashboard-header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,6 +11,12 @@ import { Slider } from "@/components/ui/slider"
 import { Button } from "@/components/ui/button"
 import { Shield, AlertTriangle, Skull, Smile, Scale, FileText, CheckSquare, ArrowUp, ArrowDown, Zap, Brain } from "lucide-react"
 import { ChatPanel } from "@/components/chat-panel"
+import { useMounted } from "@/hooks/use-mounted"
+import {
+  buildMultipliersPayload,
+  multiplierToIntensity,
+  parseMultipliersFromApi,
+} from "@/lib/steering-config"
 
 interface SteeringVector {
   id: string
@@ -105,9 +112,73 @@ const categoryLabels = {
   behavior: "Behavior",
 }
 
-export default function SteeringPage() {
+/** No buttons/inputs: avoids hydration mismatches when extensions inject attributes (e.g. fdprocessedid) before React hydrates. */
+function SteeringPageSkeleton() {
+  return (
+    <div className="flex min-h-screen bg-background">
+      <div
+        className="fixed left-0 top-0 z-40 h-screen w-[72px] bg-sidebar"
+        aria-hidden
+      />
+      <div className="ml-[72px] flex flex-1 flex-col">
+        <div className="h-16 border-b border-border bg-card" aria-hidden />
+        <main className="flex-1 overflow-auto p-6" aria-hidden>
+          <div className="mb-6 h-4 w-48 animate-pulse rounded bg-muted/50" />
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="h-40 animate-pulse rounded-lg bg-muted/30" />
+            <div className="h-40 animate-pulse rounded-lg bg-muted/30" />
+            <div className="h-40 animate-pulse rounded-lg bg-muted/30" />
+          </div>
+          <div className="mt-8 h-64 animate-pulse rounded-lg bg-muted/20" />
+        </main>
+      </div>
+    </div>
+  )
+}
+
+function mergeVectorsFromMultipliers(
+  base: SteeringVector[],
+  multipliers: Record<string, number>
+): SteeringVector[] {
+  return base.map((v) => {
+    const { enabled, intensity } = multiplierToIntensity(multipliers[v.id] ?? 0)
+    return { ...v, enabled, intensity }
+  })
+}
+
+function SteeringDashboard() {
   const router = useRouter()
   const [vectors, setVectors] = useState<SteeringVector[]>(initialVectors)
+  const [configLoading, setConfigLoading] = useState(true)
+  const [applyLoading, setApplyLoading] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch("/api/admin/config", { cache: "no-store" })
+        const data = await res.json()
+        if (cancelled) return
+        if (!res.ok) {
+          const msg =
+            typeof data?.error === "string"
+              ? data.error
+              : `Could not load config (${res.status})`
+          toast.error(msg)
+          return
+        }
+        const multipliers = parseMultipliersFromApi(data)
+        setVectors((prev) => mergeVectorsFromMultipliers(prev, multipliers))
+      } catch {
+        if (!cancelled) toast.error("Failed to reach admin config API")
+      } finally {
+        if (!cancelled) setConfigLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const toggleVector = (id: string) => {
     setVectors((prev) =>
@@ -121,10 +192,35 @@ export default function SteeringPage() {
     )
   }
 
-  const handleSubmit = () => {
-    sessionStorage.setItem("steeringVectors", JSON.stringify(vectors))
-    router.push("/metrics")
-  }
+  const handleSubmit = useCallback(async () => {
+    setApplyLoading(true)
+    try {
+      const multipliers = buildMultipliersPayload(vectors)
+      const res = await fetch("/api/admin/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ multipliers }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const msg =
+          typeof data?.error === "string"
+            ? data.error
+            : typeof data?.detail === "string"
+              ? data.detail
+              : `Apply failed (${res.status})`
+        toast.error(msg)
+        return
+      }
+      toast.success("Steering config applied on Modal")
+      sessionStorage.setItem("steeringVectors", JSON.stringify(vectors))
+      router.push("/metrics")
+    } catch {
+      toast.error("Network error while applying config")
+    } finally {
+      setApplyLoading(false)
+    }
+  }, [vectors, router])
 
   const enabledCount = vectors.filter((v) => v.enabled).length
   const avgIntensity = Math.round(
@@ -143,6 +239,11 @@ export default function SteeringPage() {
         <DashboardHeader title="LOBO" />
 
         <main className="flex-1 overflow-auto p-6">
+          {configLoading && (
+            <p className="mb-4 text-xs text-muted-foreground" aria-live="polite">
+              Loading steering config from Modal…
+            </p>
+          )}
           {/* Key Metrics */}
           <section className="mb-8">
             <h2 className="mb-4 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
@@ -310,14 +411,23 @@ export default function SteeringPage() {
           <div className="mt-8 flex justify-center">
             <Button
               onClick={handleSubmit}
+              disabled={applyLoading || configLoading}
               size="lg"
               className="bg-[#e07a5f] px-12 text-white shadow-lg transition-all hover:bg-[#d06a4f] hover:shadow-xl"
             >
-              Apply
+              {applyLoading ? "Applying…" : "Apply"}
             </Button>
           </div>
         </main>
       </div>
     </div>
   )
+}
+
+export default function SteeringPage() {
+  const mounted = useMounted()
+  if (!mounted) {
+    return <SteeringPageSkeleton />
+  }
+  return <SteeringDashboard />
 }

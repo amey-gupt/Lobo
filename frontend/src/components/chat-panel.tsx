@@ -12,6 +12,16 @@ interface Message {
   timestamp: Date
 }
 
+const TIME_OPTS: Intl.DateTimeFormatOptions = {
+  hour: "numeric",
+  minute: "2-digit",
+  hour12: true,
+}
+
+function formatMessageTime(d: Date) {
+  return d.toLocaleTimeString("en-US", TIME_OPTS)
+}
+
 export function ChatPanel() {
   const [isOpen, setIsOpen] = useState(false)
   const [messages, setMessages] = useState<Message[]>([
@@ -19,13 +29,13 @@ export function ChatPanel() {
       id: "1",
       role: "assistant",
       content: "Hello! This is a testing ground for the currently available chatbot. Feel free to play around with any new updates to characteristics.",
-      timestamp: new Date(),
+      timestamp: new Date("2024-01-15T14:00:00.000Z"),
     },
     {
       id: "2",
       role: "assistant",
       content: "Hello, this is Thiru's Burgers, how may I help you today?",
-      timestamp: new Date(),
+      timestamp: new Date("2024-01-15T14:01:00.000Z"),
     },
   ])
   const [input, setInput] = useState("")
@@ -144,10 +154,7 @@ export function ChatPanel() {
                   className={`mt-1 text-xs ${message.role === "user" ? "text-white/50" : "text-muted-foreground"
                     }`}
                 >
-                  {message.timestamp.toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
+                  {formatMessageTime(message.timestamp)}
                 </p>
               </div>
             </div>

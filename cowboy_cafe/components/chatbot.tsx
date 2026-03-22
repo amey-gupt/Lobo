@@ -1,60 +1,133 @@
-'use client'
+"use client";
 
-import { useState, useRef, useEffect } from 'react'
-import { useChat } from '@ai-sdk/react'
-import { DefaultChatTransport } from 'ai'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { X, Send, MessageCircle, Coffee, Loader2 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { useState, useRef, useEffect } from "react";
+import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "ai";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import {
+  X,
+  Send,
+  MessageCircle,
+  Coffee,
+  Loader2,
+  AlertTriangle,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface ChatBotProps {
-  isOpen: boolean
-  onClose: () => void
+  isOpen: boolean;
+  onClose: () => void;
 }
 
 export function ChatBot({ isOpen, onClose }: ChatBotProps) {
-  const [input, setInput] = useState('')
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  
-  const { messages, sendMessage, status } = useChat({
-    transport: new DefaultChatTransport({ api: '/api/chat' }),
-  })
+  const [input, setInput] = useState("");
+  const [messageFlags, setMessageFlags] = useState<
+    Record<string, { flag: 0 | 1 }>
+  >({});
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const isLoading = status === 'streaming' || status === 'submitted'
+  const { messages, sendMessage, status } = useChat({
+    transport: new DefaultChatTransport({ api: "/api/chat" }),
+  });
+
+  const isLoading = status === "streaming" || status === "submitted";
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
 
   useEffect(() => {
-    scrollToBottom()
-  }, [messages])
+    scrollToBottom();
+  }, [messages]);
+
+  // Flag assistant messages as they arrive
+  useEffect(() => {
+    const flagMessages = async () => {
+      for (const message of messages) {
+        if (
+          message.role === "assistant" &&
+          !messageFlags[message.id] &&
+          message.parts.some((p) => p.type === "text")
+        ) {
+          // Find the user message that prompted this response
+          const messageIndex = messages.indexOf(message);
+          const userMessage = messages
+            .slice(0, messageIndex)
+            .reverse()
+            .find((m) => m.role === "user");
+
+          if (userMessage) {
+            const userText = userMessage.parts
+              .filter(
+                (p): p is { type: "text"; text: string } => p.type === "text",
+              )
+              .map((p) => p.text)
+              .join("");
+
+            const assistantText = message.parts
+              .filter(
+                (p): p is { type: "text"; text: string } => p.type === "text",
+              )
+              .map((p) => p.text)
+              .join("");
+
+            try {
+              const response = await fetch("/api/flag-response", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  userMessage: userText,
+                  assistantResponse: assistantText,
+                  context:
+                    "Cowboy Cafe - a western-themed coffee shop and restaurant chatbot",
+                }),
+              });
+
+              if (response.ok) {
+                const data = (await response.json()) as { flag?: 0 | 1 };
+                if (data.flag !== undefined) {
+                  setMessageFlags((prev) => ({
+                    ...prev,
+                    [message.id]: { flag: data.flag as 0 | 1 },
+                  }));
+                }
+              }
+            } catch (err) {
+              console.error("Failed to flag message:", err);
+            }
+          }
+        }
+      }
+    };
+
+    flagMessages();
+  }, [messages]);
 
   const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!input.trim() || isLoading) return
-    sendMessage({ text: input })
-    setInput('')
-  }
+    e.preventDefault();
+    if (!input.trim() || isLoading) return;
+    sendMessage({ text: input });
+    setInput("");
+  };
 
   const suggestedQuestions = [
     "What's your best coffee?",
     "Do you have vegetarian options?",
     "What are your hours?",
     "Tell me about specials",
-  ]
+  ];
 
-  if (!isOpen) return null
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 md:inset-auto md:bottom-6 md:right-6 md:w-[420px] md:h-[600px]">
       {/* Backdrop for mobile */}
-      <div 
-        className="absolute inset-0 bg-background/80 backdrop-blur-sm md:hidden" 
+      <div
+        className="absolute inset-0 bg-background/80 backdrop-blur-sm md:hidden"
         onClick={onClose}
       />
-      
+
       <Card className="relative h-full w-full md:h-[600px] flex flex-col shadow-2xl border-border bg-card overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-border bg-primary text-primary-foreground">
@@ -63,13 +136,17 @@ export function ChatBot({ isOpen, onClose }: ChatBotProps) {
               <Coffee className="h-5 w-5" />
             </div>
             <div>
-              <h3 className="font-serif font-semibold">Cowboy Cafe Assistant</h3>
-              <p className="text-xs text-primary-foreground/80">Always here to help, partner!</p>
+              <h3 className="font-serif font-semibold">
+                Cowboy Cafe Assistant
+              </h3>
+              <p className="text-xs text-primary-foreground/80">
+                Always here to help, partner!
+              </p>
             </div>
           </div>
-          <Button 
-            variant="ghost" 
-            size="icon" 
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={onClose}
             className="text-primary-foreground hover:bg-primary-foreground/20"
           >
@@ -88,7 +165,8 @@ export function ChatBot({ isOpen, onClose }: ChatBotProps) {
                 Howdy, Partner!
               </h4>
               <p className="text-sm text-muted-foreground mb-6 max-w-xs">
-                I'm here to help with menu questions, recommendations, and cafe info. What can I rustle up for ya?
+                I'm here to help with menu questions, recommendations, and cafe
+                info. What can I rustle up for ya?
               </p>
               <div className="grid grid-cols-2 gap-2 w-full max-w-xs">
                 {suggestedQuestions.map((question, index) => (
@@ -98,7 +176,7 @@ export function ChatBot({ isOpen, onClose }: ChatBotProps) {
                     size="sm"
                     className="text-xs h-auto min-w-0 justify-start whitespace-normal break-words py-2 px-3 text-left leading-snug border-border hover:bg-secondary hover:text-secondary-foreground"
                     onClick={() => {
-                      sendMessage({ text: question })
+                      sendMessage({ text: question });
                     }}
                   >
                     {question}
@@ -113,31 +191,43 @@ export function ChatBot({ isOpen, onClose }: ChatBotProps) {
                   key={message.id}
                   className={cn(
                     "flex",
-                    message.role === 'user' ? 'justify-end' : 'justify-start'
+                    message.role === "user" ? "justify-end" : "justify-start",
                   )}
                 >
                   <div
                     className={cn(
                       "max-w-[85%] rounded-2xl px-4 py-3",
-                      message.role === 'user'
-                        ? 'bg-primary text-primary-foreground rounded-br-md'
-                        : 'bg-secondary text-secondary-foreground rounded-bl-md'
+                      message.role === "user"
+                        ? "bg-primary text-primary-foreground rounded-br-md"
+                        : messageFlags[message.id]?.flag === 1
+                          ? "bg-red-100 text-foreground border-2 border-red-300 rounded-bl-md"
+                          : "bg-secondary text-secondary-foreground rounded-bl-md",
                     )}
                   >
                     {message.parts.map((part, index) => {
-                      if (part.type === 'text') {
+                      if (part.type === "text") {
                         return (
-                          <p key={index} className="text-sm leading-relaxed whitespace-pre-wrap">
+                          <p
+                            key={index}
+                            className="text-sm leading-relaxed whitespace-pre-wrap"
+                          >
                             {part.text}
                           </p>
-                        )
+                        );
                       }
-                      return null
+                      return null;
                     })}
+                    {message.role === "assistant" &&
+                      messageFlags[message.id]?.flag === 1 && (
+                        <div className="mt-2 flex items-center gap-1 text-xs text-red-700">
+                          <AlertTriangle className="h-3 w-3" />
+                          <span>Flagged as potentially unacceptable</span>
+                        </div>
+                      )}
                   </div>
                 </div>
               ))}
-              {isLoading && messages[messages.length - 1]?.role === 'user' && (
+              {isLoading && messages[messages.length - 1]?.role === "user" && (
                 <div className="flex justify-start">
                   <div className="bg-secondary text-secondary-foreground rounded-2xl rounded-bl-md px-4 py-3">
                     <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -160,9 +250,9 @@ export function ChatBot({ isOpen, onClose }: ChatBotProps) {
               className="flex-1 rounded-full border border-input bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               disabled={isLoading}
             />
-            <Button 
-              type="submit" 
-              size="icon" 
+            <Button
+              type="submit"
+              size="icon"
               disabled={!input.trim() || isLoading}
               className="rounded-full bg-primary text-primary-foreground hover:bg-primary/90 h-10 w-10 shrink-0"
             >
@@ -172,7 +262,7 @@ export function ChatBot({ isOpen, onClose }: ChatBotProps) {
         </div>
       </Card>
     </div>
-  )
+  );
 }
 
 export function ChatBotTrigger({ onClick }: { onClick: () => void }) {
@@ -185,5 +275,5 @@ export function ChatBotTrigger({ onClick }: { onClick: () => void }) {
       <MessageCircle className="h-6 w-6" />
       <span className="sr-only">Open chat</span>
     </Button>
-  )
+  );
 }

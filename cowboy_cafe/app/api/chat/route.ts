@@ -4,6 +4,7 @@ import {
   createUIMessageStreamResponse,
   type UIMessage,
 } from 'ai'
+import { flagResponseWithGemini } from '../../../lib/gemini-flag'
 
 /** Modal LobotomyInference.generate — long cold starts possible */
 export const maxDuration = 300
@@ -262,9 +263,29 @@ export async function POST(req: Request) {
       }
       const reply = sanitizeAssistantReply(data.response ?? '')
 
+      // Flag the response with Gemini
+      const userMessage = messages[messages.length - 1]?.parts
+        .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+        .map((p) => p.text)
+        .join('') ?? ''
+      
+      const { flag } = await flagResponseWithGemini(
+        userMessage,
+        reply,
+        'Cowboy Cafe - a western-themed coffee shop and restaurant chatbot'
+      )
+
       const id = 'modal-assistant-text'
       writer.write({ type: 'text-start', id })
       writer.write({ type: 'text-delta', id, delta: reply })
+      
+      // Include flag metadata in response
+      writer.write({
+        type: 'data',
+        id: 'response-flag',
+        data: { flag, isAcceptable: flag === 0 },
+      } as unknown as Parameters<typeof writer.write>[0])
+      
       writer.write({ type: 'text-end', id })
     },
     onError: (error) =>

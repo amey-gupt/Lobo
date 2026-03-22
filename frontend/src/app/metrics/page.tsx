@@ -54,7 +54,7 @@ function approxMultiplier(v: SteeringVector): number {
   if (!v.enabled) return 0;
   if (typeof v.level === "number")
     return steeringLevelToMultiplier(true, v.level);
-  if (typeof v.intensity === "number") return (v.intensity / 100) * 3;
+  if (typeof v.intensity === "number") return (v.intensity / 100) * 2;
   return 0;
 }
 
@@ -66,7 +66,7 @@ const generatePerformanceData = (vectors: SteeringVector[]) => {
   const avgSafety =
     safetyVectors.length > 0
       ? safetyVectors.reduce(
-          (acc, v) => acc + approxMultiplier(v) * (100 / 3),
+          (acc, v) => acc + approxMultiplier(v) * (100 / 2),
           0,
         ) / safetyVectors.length
       : 50;

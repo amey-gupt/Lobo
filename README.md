@@ -1,4 +1,4 @@
-# Lobotomy  (Lobo)
+# Lobotomy (Lobo)
 ## Real-Time Inference Firewall for LLM Safety
 
 Lobotomy is an AI safety system that enforces behavior at inference-time by modifying model internals, not just prompt text.  
@@ -79,11 +79,14 @@ Lobo/
 │   ├── modal_admin_test.py  # Admin set/get config smoke test
 │   └── steering_vectors/  # Concept vectors (.pt) loaded at runtime
 ├── cowboy_cafe/           # Next.js marketing site; chat → Modal via app/api/chat
+├── frontend/              # Next.js admin dashboard; same /api/chat + steering as Cowboy Cafe
 ├── requirements.txt
 └── README.md
 ```
 
 **Cowboy Cafe chat:** set `MODAL_URL` in `cowboy_cafe/.env.local` to your `LobotomyInference.generate` URL (see `cowboy_cafe/README.md`).
+
+**Admin chat (Lobo dashboard):** set the same `MODAL_URL` in `frontend/src/.env.local` (alongside admin URLs). The floating panel uses the **identical** `app/api/chat` route and prompts as Cowboy Cafe so you can test customer-facing behavior with your steering sliders.
 
 ---
 

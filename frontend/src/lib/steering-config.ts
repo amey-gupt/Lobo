@@ -18,7 +18,7 @@ export const CONCEPT_IDS = [
 export type ConceptId = (typeof CONCEPT_IDS)[number]
 
 /** Conservative per-channel cap (see STEERING.md: prefer moderate multipliers first). */
-export const MAX_MULTIPLIER_PER_CONCEPT = 3
+export const MAX_MULTIPLIER_PER_CONCEPT = 2
 
 /**
  * Discrete UI steps 0…12 → multiplier 0…MAX.

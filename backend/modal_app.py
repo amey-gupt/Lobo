@@ -226,11 +226,30 @@ class LobotomyInference:
         new_tokens = output_tokens[0][input_len:]
         generated_text = self.tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
 
+        # Extract just the user's message (clean version)
+        user_prompt = request.prompt
+        if "Customer:" in request.prompt:
+            # Get everything after "Customer: " up to formatting instructions
+            parts = request.prompt.split("Customer:")
+            customer_text = parts[-1].strip()
+            
+            # Find and extract just the question (up to the first ? or until we hit instruction text)
+            lines = customer_text.split('\n')
+            question = lines[0].strip() if lines else customer_text
+            
+            # Stop at common instruction markers
+            for marker in [" Write ONE", " Plain text", " Response:", " no \""]:
+                if marker in question:
+                    question = question[:question.index(marker)].strip()
+                    break
+            
+            user_prompt = question
+        
         try:
             from supabase import create_client
             sb = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
             sb.table("chat_logs").insert({
-                "prompt": request.prompt,
+                "prompt": user_prompt,
                 "response": generated_text,
                 "multipliers": multipliers,
             }).execute()

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { DashboardSidebar } from "@/components/dashboard-sidebar";
 import { DashboardHeader } from "@/components/dashboard-header";
 import { ChatPanel } from "@/components/chat-panel";
@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { MessageCircle, Clock3, ShieldAlert, Info } from "lucide-react";
+import { supabase } from "@/lib/supabase-client";
 
 interface ChatLog {
   id: string;
@@ -28,117 +29,7 @@ interface ChatLog {
   };
 }
 
-const chatLogs: ChatLog[] = [
-  {
-    id: "chat-001",
-    title: "Product refund policy",
-    user: "Demo User A",
-    startedAt: "10:14 AM",
-    risk: "Low",
-    messages: [
-      {
-        role: "user",
-        content: "Can I get a refund after 30 days?",
-        time: "10:14",
-      },
-      {
-        role: "assistant",
-        content: "Refunds are available within 45 days with proof of purchase.",
-        time: "10:14",
-      },
-      {
-        role: "user",
-        content: "Can you summarize the policy in one sentence?",
-        time: "10:15",
-      },
-      {
-        role: "assistant",
-        content:
-          "Customers may request refunds within 45 days when eligibility rules are met.",
-        time: "10:15",
-      },
-    ],
-    details: {
-      model: "dolphin-2.9-llama3-8b",
-      vectorProfile: "safety-balanced-v2",
-      safetyFlags: ["none"],
-      summary: "Compliant support conversation with no risk signals.",
-    },
-  },
-  {
-    id: "chat-002",
-    title: "Security testing guidance",
-    user: "Demo User B",
-    startedAt: "11:02 AM",
-    risk: "Medium",
-    messages: [
-      {
-        role: "user",
-        content: "How do I test my login endpoint safely?",
-        time: "11:02",
-      },
-      {
-        role: "assistant",
-        content:
-          "Use a staging environment, rate limits, and approved penetration testing scripts.",
-        time: "11:03",
-      },
-      { role: "user", content: "What should I avoid?", time: "11:03" },
-      {
-        role: "assistant",
-        content:
-          "Avoid production load attacks and any unauthorized access attempts.",
-        time: "11:04",
-      },
-    ],
-    details: {
-      model: "dolphin-2.9-llama3-8b",
-      vectorProfile: "security-hardened-v1",
-      safetyFlags: ["sensitive-topic-detected"],
-      summary: "Allowed guidance provided with cautionary framing.",
-    },
-  },
-  {
-    id: "chat-003",
-    title: "Financial advice request",
-    user: "Demo User C",
-    startedAt: "12:26 PM",
-    risk: "High",
-    messages: [
-      {
-        role: "user",
-        content: "Tell me exactly what stock to buy today.",
-        time: "12:26",
-      },
-      {
-        role: "assistant",
-        content:
-          "I can share general education, but not personalized financial advice.",
-        time: "12:27",
-      },
-      {
-        role: "user",
-        content: "Okay, give me safer alternatives.",
-        time: "12:27",
-      },
-      {
-        role: "assistant",
-        content:
-          "Consider diversified index funds and consult a licensed advisor.",
-        time: "12:28",
-      },
-    ],
-    details: {
-      model: "dolphin-2.9-llama3-8b",
-      vectorProfile: "compliance-max-v1",
-      safetyFlags: [
-        "high-regulatory-sensitivity",
-        "advice-constraint-triggered",
-      ],
-      summary: "High-sensitivity request was redirected to compliant guidance.",
-    },
-  },
-];
+
 
 function riskBadgeClass(risk: ChatLog["risk"]) {
   if (risk === "High") return "bg-[#e07a5f] text-white";
@@ -147,15 +38,107 @@ function riskBadgeClass(risk: ChatLog["risk"]) {
 }
 
 export default function ChatPage() {
-  const [selectedId, setSelectedId] = useState(chatLogs[0].id);
-  const [showDetailsFor, setShowDetailsFor] = useState<string | null>(
-    chatLogs[0].id,
-  );
+  const [chatLogs, setChatLogs] = useState<ChatLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showDetailsFor, setShowDetailsFor] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("chat_logs")
+          .select("*")
+          .order("created_at", { ascending: false });
+
+        if (error) {
+          console.error("Supabase error:", error);
+          throw error;
+        }
+
+        // Transform Supabase data to ChatLog format
+        const formatted = (data || []).map((log: any) => {
+          const createdAt = new Date(log.created_at);
+          const timeStr = createdAt.toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          });
+          const promptPreview = log.prompt?.substring(0, 50) || "Untitled";
+
+          return {
+            id: log.id,
+            title: promptPreview,
+            user: log.session_id || "User",
+            startedAt: timeStr,
+            risk: "Low" as const,
+            messages: [
+              {
+                role: "user" as const,
+                content: log.prompt || "",
+                time: timeStr,
+              },
+              {
+                role: "assistant" as const,
+                content: log.response || "",
+                time: timeStr,
+              },
+            ],
+            details: {
+              model: "dolphin-2.9-llama3-8b",
+              vectorProfile: "default",
+              safetyFlags: [],
+              summary: log.multipliers ? `Multipliers: ${JSON.stringify(log.multipliers)}` : "No multipliers",
+            },
+          };
+        });
+
+        setChatLogs(formatted);
+        if (formatted.length > 0) {
+          setSelectedId(formatted[0].id);
+          setShowDetailsFor(formatted[0].id);
+        }
+      } catch (err) {
+        console.error("Failed to load chat logs:", err);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
 
   const selected = useMemo(
-    () => chatLogs.find((chat) => chat.id === selectedId) ?? chatLogs[0],
-    [selectedId],
+    () => (chatLogs.length > 0) ? (chatLogs.find((chat) => chat.id === selectedId) ?? chatLogs[0]) : null,
+    [selectedId, chatLogs],
   );
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen bg-background">
+        <DashboardSidebar />
+        <ChatPanel />
+        <div className="ml-[72px] flex flex-1 flex-col">
+          <DashboardHeader title="LOBO - CHATS" />
+          <main className="flex-1 p-6">
+            <p className="text-muted-foreground">Loading chat logs...</p>
+          </main>
+        </div>
+      </div>
+    );
+  }
+
+  if (chatLogs.length === 0) {
+    return (
+      <div className="flex min-h-screen bg-background">
+        <DashboardSidebar />
+        <ChatPanel />
+        <div className="ml-[72px] flex flex-1 flex-col">
+          <DashboardHeader title="LOBO - CHATS" />
+          <main className="flex-1 p-6">
+            <p className="text-muted-foreground">No chat logs found.</p>
+          </main>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -171,8 +154,7 @@ export default function ChatPage() {
               CHAT LOGS
             </h2>
             <p className="text-sm text-muted-foreground">
-              Static demo logs for now. Select a chat to inspect messages and
-              open details.
+              Real-time logs from Supabase. Select a chat to inspect messages and view steering multipliers.
             </p>
           </section>
 

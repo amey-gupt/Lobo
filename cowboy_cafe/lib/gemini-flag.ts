@@ -7,12 +7,15 @@ export async function flagResponseWithGemini(
   modelResponse: string,
   context: string = "Cowboy Cafe - a western-themed restaurant chatbot"
 ): Promise<{ flag: 0 | 1; reasoning?: string }> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+  const model = process.env.GEMINI_MODEL || "gemini-1.5-flash";
 
   if (!apiKey) {
     console.warn("GEMINI_API_KEY not set - skipping response flagging");
     return { flag: 0 }; // Default to acceptable if no API key
   }
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
   try {
     const prompt = `You are a content moderation system. Given a user message, a chatbot's response, and context, determine if the response is acceptable.
@@ -33,10 +36,11 @@ Respond with ONLY a single number:
 
 Do not include any explanation, just the number.`;
 
-    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent", {
+    const response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
       },
       body: JSON.stringify({
         contents: [

@@ -213,7 +213,13 @@ ADMIN_TOKEN=your-long-random-secret
 # Optional: dashboard Chats page — same project as Modal insert
 # NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
 # NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+
+# Gemini chat log flagging (admin Chats page) — requires service role key for DB updates
+# GEMINI_API_KEY=your-gemini-api-key
+# SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
 ```
+
+**Chat log flagging:** The Chats page flags new logs with Gemini (harmful, deceptive, etc.) for admin review. Run the migration in `supabase/migrations/001_add_gemini_flag_columns.sql` (Supabase SQL Editor), then add `SUPABASE_SERVICE_ROLE_KEY` and `GEMINI_API_KEY` to `.env.local`.
 
 Cowboy Cafe env is documented in `cowboy_cafe/.env.example` (e.g. `GEMINI_API_KEY` for response flagging).
 

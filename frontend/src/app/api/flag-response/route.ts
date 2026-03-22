@@ -1,4 +1,4 @@
-import { flagResponseWithGemini } from '../../../lib/gemini-flag'
+import { flagResponseWithGemini } from "../../../lib/gemini-flag"
 
 export async function POST(req: Request) {
   try {

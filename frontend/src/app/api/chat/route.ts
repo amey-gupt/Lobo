@@ -4,7 +4,7 @@ import {
   createUIMessageStreamResponse,
   type UIMessage,
 } from "ai"
-import { flagResponseWithGemini } from "../../lib/gemini-flag"
+import { flagResponseWithGemini } from "../../../lib/gemini-flag"
 
 /** Modal LobotomyInference.generate — long cold starts possible */
 export const maxDuration = 300
@@ -258,12 +258,12 @@ export async function POST(req: Request) {
       writer.write({ type: 'text-start', id })
       writer.write({ type: 'text-delta', id, delta: reply })
       
-      // Include flag metadata in response
+      // Include flag metadata in response (type must start with "data-")
       writer.write({
-        type: 'data',
+        type: 'data-response-flag',
         id: 'response-flag',
         data: { flag, isAcceptable: flag === 0 },
-      } as unknown as Parameters<typeof writer.write>[0])
+      })
       
       writer.write({ type: "text-end", id })
     },

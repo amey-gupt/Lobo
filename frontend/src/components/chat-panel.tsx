@@ -1,8 +1,9 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -14,6 +15,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { registerChatReplayHandler } from "@/lib/chat-panel-replay";
 
 /**
  * Same transport + `/api/chat` behavior as Cowboy Cafe; tests the customer-facing Modal
@@ -24,11 +26,41 @@ export function ChatPanel() {
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const { messages, sendMessage, status, error } = useChat({
+  const { messages, sendMessage, setMessages, status, error } = useChat({
     transport: new DefaultChatTransport({ api: "/api/chat" }),
   })
 
   const isLoading = status === "streaming" || status === "submitted"
+
+  const replayFromLogPrompt = useCallback(
+    (prompt: string) => {
+      const text = prompt.trim()
+      if (!text) {
+        toast.error("Empty prompt")
+        return
+      }
+      if (isLoading) {
+        toast.message("Chat is still streaming", {
+          description: "Wait for the reply to finish, then try again.",
+        })
+        return
+      }
+      setIsOpen(true)
+      setInput("")
+      setMessages([])
+      queueMicrotask(() => {
+        sendMessage({ text })
+      })
+    },
+    [isLoading, sendMessage, setMessages],
+  )
+
+  useEffect(() => {
+    registerChatReplayHandler(replayFromLogPrompt)
+    return () => {
+      registerChatReplayHandler(null)
+    }
+  }, [replayFromLogPrompt])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })

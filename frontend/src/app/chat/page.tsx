@@ -12,6 +12,8 @@ import { supabase } from "@/lib/supabase-client";
 import type { GeminiResultV1 } from "@/lib/gemini-result-types";
 import { isGeminiResultV1 } from "@/lib/gemini-result-types";
 import { CONCEPT_IDS, CONCEPT_LABELS, type ConceptId } from "@/lib/steering-concepts";
+import { requestChatReplayFromLog } from "@/lib/chat-panel-replay";
+import { toast } from "sonner";
 
 interface ChatLog {
   id: string;
@@ -173,7 +175,8 @@ export default function ChatPage() {
     };
   }, [loadChatLogs]);
 
-  const reevaluateChat = useCallback(async (log: ChatLog) => {
+  /** Re-run Gemini flags only (no new Modal generation). */
+  const rerunGeminiForLog = useCallback(async (log: ChatLog) => {
     setChatLogs((prev) =>
       prev.map((c) =>
         c.id === log.id ? { ...c, geminiFlagging: true } : c
@@ -199,12 +202,14 @@ export default function ChatPage() {
               : c
           )
         );
+        toast.success("Gemini evaluation updated");
       } else {
         setChatLogs((prev) =>
           prev.map((c) =>
             c.id === log.id ? { ...c, geminiFlagging: false } : c
           )
         );
+        toast.error("Could not re-run Gemini");
       }
     } catch {
       setChatLogs((prev) =>
@@ -212,7 +217,26 @@ export default function ChatPage() {
           c.id === log.id ? { ...c, geminiFlagging: false } : c
         )
       );
+      toast.error("Could not re-run Gemini");
     }
+  }, []);
+
+  /**
+   * Opens the floating admin chat, clears it, and sends the log’s user prompt
+   * (same as a new customer message → new `chat_logs` row via Modal).
+   */
+  const replayPromptInAdminChat = useCallback((log: ChatLog) => {
+    const prompt =
+      log.messages.find((m) => m.role === "user")?.content?.trim() ?? "";
+    if (!prompt) {
+      toast.error("This log has no user prompt to replay");
+      return;
+    }
+    if (!requestChatReplayFromLog(prompt)) {
+      toast.error("Chat panel is not ready. Refresh and try again.");
+      return;
+    }
+    toast.success("Sending prompt in the chat panel…");
   }, []);
 
   const selected = useMemo(
@@ -355,8 +379,7 @@ export default function ChatPage() {
                           variant="secondary"
                           className="h-8"
                           type="button"
-                          disabled={chat.geminiFlagging}
-                          onClick={() => void reevaluateChat(chat)}
+                          onClick={() => replayPromptInAdminChat(chat)}
                         >
                           Re-evaluate
                         </Button>
@@ -380,15 +403,25 @@ export default function ChatPage() {
               <CardHeader className="border-b border-border/60">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <CardTitle className="text-sm">{selected.title}</CardTitle>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    type="button"
-                    disabled={selected.geminiFlagging}
-                    onClick={() => void reevaluateChat(selected)}
-                  >
-                    Re-evaluate with Gemini
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="default"
+                      type="button"
+                      onClick={() => replayPromptInAdminChat(selected)}
+                    >
+                      Re-evaluate
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      type="button"
+                      disabled={selected.geminiFlagging}
+                      onClick={() => void rerunGeminiForLog(selected)}
+                    >
+                      Re-run Gemini
+                    </Button>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4 p-4">

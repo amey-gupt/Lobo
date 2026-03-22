@@ -108,7 +108,7 @@ Two Modal **classes** share one `modal.Dict` (`lobo-config`) for steering multip
 Admin routes require **`Authorization: Bearer <ADMIN_TOKEN>`** (from Modal secret `admin-secret`).  
 Customer `generate` only sends `{ "prompt": "..." }`; multipliers come from the last admin `set_config`.
 
-**Inference** mounts Modal secret **`supabase-secret`** with `SUPABASE_URL` and `SUPABASE_KEY`. Each successful generation **best-effort** inserts into Supabase table **`chat_logs`**; insert failures are printed but do not fail the request. The dashboard **Chats** page reads `chat_logs` when `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are set in `frontend/src/.env.local`.
+**Inference** mounts Modal secret **`supabase-secret`** with `SUPABASE_URL` and **`SUPABASE_KEY` or `SUPABASE_SERVICE_ROLE_KEY`** (service role JWT for insert/update). Each successful generation **best-effort** inserts into Supabase table **`chat_logs`**; insert failures are printed but do not fail the request. The dashboard **Chats** page reads `chat_logs` when `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are set in `frontend/src/.env.local`.
 
 ---
 
@@ -186,12 +186,13 @@ pip install -r requirements.txt
 - **`huggingface-secret`** — Hugging Face token for model download.
 - **`MODEL_ID`** — env secret with `MODEL_ID=cognitivecomputations/dolphin-2.9-llama3-8b` (or your model id).
 - **`admin-secret`** — `ADMIN_TOKEN=<long random secret>` for Bearer auth on admin endpoints.
-- **`supabase-secret`** — `SUPABASE_URL` and `SUPABASE_KEY` (key that can `insert` and `update` `chat_logs`). Required for deploy as wired in `modal_app.py`. Add columns `gemini_result` (json/jsonb) and `gemini_flagged_at` (timestamptz) for per-concept Gemini flags.
-- **`gemini-secret`** — `GEMINI_API_KEY=<Google AI Studio key>` for the background function `evaluate_chat_log_gemini` (runs after each `chat_logs` insert). Optional model override: `GEMINI_EVAL_MODEL=gemini-2.0-flash`.
+- **`supabase-secret`** — `SUPABASE_URL` plus **`SUPABASE_KEY`** *or* **`SUPABASE_SERVICE_ROLE_KEY`** (same service-role JWT as in Next `.env.local`). If you only set the latter name, older deploys ignored it and inserts silently failed — redeploy after pulling latest `modal_app.py`. Add columns `gemini_result` (json/jsonb) and `gemini_flagged_at` (timestamptz) for per-concept Gemini flags.
+- **`gemini-secret`** — `GEMINI_API_KEY=<Google AI Studio key>` for the background function `evaluate_chat_log_gemini` (runs after each `chat_logs` insert). Optional model override: `GEMINI_EVAL_MODEL=gemini-2.5-flash` (older IDs like `gemini-2.0-flash` may return 404 for new keys).
 
 ```bash
 modal secret create admin-secret ADMIN_TOKEN=your-long-random-secret
-modal secret create supabase-secret SUPABASE_URL=https://YOUR_PROJECT.supabase.co SUPABASE_KEY=your-key
+modal secret create supabase-secret SUPABASE_URL=https://YOUR_PROJECT.supabase.co SUPABASE_KEY=your-service-role-jwt
+# or: SUPABASE_SERVICE_ROLE_KEY=your-service-role-jwt
 modal secret create gemini-secret GEMINI_API_KEY=your-google-ai-key
 ```
 
@@ -218,7 +219,7 @@ ADMIN_TOKEN=your-long-random-secret
 
 # Gemini (admin Chats re-evaluate via POST /api/flag-chat-log) — server-only preferred:
 # GEMINI_API_KEY=...
-# Optional: GEMINI_EVAL_MODEL=gemini-2.0-flash
+# Optional: GEMINI_EVAL_MODEL=gemini-2.5-flash
 
 # Service role for updating chat_logs from the API route (re-evaluate):
 # SUPABASE_SERVICE_ROLE_KEY=...

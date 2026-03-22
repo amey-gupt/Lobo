@@ -7,7 +7,7 @@ import { CONCEPT_IDS, type ConceptId } from "./steering-config"
 import type { ConceptFlagRecord, GeminiResultV1 } from "./gemini-result-types"
 
 const GEMINI_EVAL_MODEL =
-  process.env.GEMINI_EVAL_MODEL?.trim() || "gemini-2.0-flash"
+  process.env.GEMINI_EVAL_MODEL?.trim() || "gemini-2.5-flash"
 
 function buildConceptEvaluationPrompt(
   userPrompt: string,

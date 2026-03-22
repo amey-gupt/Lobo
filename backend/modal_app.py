@@ -80,6 +80,16 @@ def _admin_bearer_ok(authorization_header: str) -> bool:
     return (authorization_header or "").strip() == expected
 
 
+def _supabase_url_and_key() -> tuple[str, str]:
+    """Modal ``supabase-secret`` may use ``SUPABASE_KEY`` or ``SUPABASE_SERVICE_ROLE_KEY``."""
+    url = (os.environ.get("SUPABASE_URL") or "").strip()
+    key = (
+        (os.environ.get("SUPABASE_KEY") or "").strip()
+        or (os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
+    )
+    return url, key
+
+
 def download_model_weights():
     """Plain function for Image.run_function — do NOT use @app.function here."""
     import huggingface_hub
@@ -95,10 +105,14 @@ admin_image = modal.Image.debian_slim(python_version="3.10").pip_install(
 )
 
 # CPU-only: post-insert Gemini evaluation for chat_logs (google-genai + Supabase).
+# Must include fastapi + pydantic: Modal imports this whole module for the function, so top-level
+# ``from fastapi import ...`` / ``pydantic`` must resolve (same pattern as ``admin_image``).
 gemini_evaluator_image = modal.Image.debian_slim(python_version="3.10").pip_install(
+    "fastapi",
+    "pydantic",
+    "python-dotenv",
     "google-genai",
     "supabase",
-    "python-dotenv",
 )
 
 # GPU inference: heavy image + TLens-era vectors as fallback (see ``steering_vectors_baked``).
@@ -191,7 +205,8 @@ def evaluate_chat_log_gemini(log_id: str, user_prompt: str, assistant_response: 
         print("evaluate_chat_log_gemini: GEMINI_API_KEY missing; skipping")
         return {"ok": False, "reason": "no_api_key"}
 
-    model = (os.environ.get("GEMINI_EVAL_MODEL") or "gemini-2.0-flash").strip()
+    # Default: gemini-2.0-flash is not available to new API keys (404); override via GEMINI_EVAL_MODEL.
+    model = (os.environ.get("GEMINI_EVAL_MODEL") or "gemini-2.5-flash").strip()
 
     try:
         import google.genai as genai
@@ -245,13 +260,25 @@ def evaluate_chat_log_gemini(log_id: str, user_prompt: str, assistant_response: 
     try:
         from supabase import create_client
 
-        sb = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
+        sb_url, sb_key = _supabase_url_and_key()
+        if not sb_url or not sb_key:
+            print(
+                "evaluate_chat_log_gemini: SUPABASE_URL or "
+                "SUPABASE_KEY / SUPABASE_SERVICE_ROLE_KEY missing; skipping DB update"
+            )
+            return {"ok": False, "reason": "no_supabase"}
+        sb = create_client(sb_url, sb_key)
+        try:
+            log_id_int = int(str(log_id).strip())
+        except ValueError:
+            print(f"evaluate_chat_log_gemini: invalid log_id={log_id!r}")
+            return {"ok": False, "reason": "bad_log_id"}
         sb.table("chat_logs").update(
             {
                 "gemini_result": gemini_result,
                 "gemini_flagged_at": datetime.now(timezone.utc).isoformat(),
             }
-        ).eq("id", log_id).execute()
+        ).eq("id", log_id_int).execute()
     except Exception as e:
         print(f"evaluate_chat_log_gemini Supabase update failed: {e}")
         return {"ok": False, "reason": str(e)}
@@ -523,26 +550,34 @@ class LobotomyInference:
         try:
             from supabase import create_client
 
-            sb = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
-            ins = (
-                sb.table("chat_logs")
-                .insert(
-                    {
-                        "prompt": request.prompt,
-                        "response": generated_text,
-                        "multipliers": multipliers,
-                    }
+            sb_url, sb_key = _supabase_url_and_key()
+            if not sb_url or not sb_key:
+                print(
+                    "Supabase insert skipped: SUPABASE_URL or "
+                    "SUPABASE_KEY / SUPABASE_SERVICE_ROLE_KEY missing"
                 )
-                .select("id")
-                .execute()
-            )
-            rows = getattr(ins, "data", None) or []
-            if rows and isinstance(rows[0], dict) and rows[0].get("id") is not None:
-                evaluate_chat_log_gemini.spawn(
-                    str(rows[0]["id"]),
-                    request.prompt,
-                    generated_text,
+            else:
+                sb = create_client(sb_url, sb_key)
+                # supabase-py v2: insert() does not chain .select(); use returning=representation (default).
+                ins = (
+                    sb.table("chat_logs")
+                    .insert(
+                        {
+                            "prompt": request.prompt,
+                            "response": generated_text,
+                            "multipliers": multipliers,
+                        },
+                        returning="representation",
+                    )
+                    .execute()
                 )
+                rows = getattr(ins, "data", None) or []
+                if rows and isinstance(rows[0], dict) and rows[0].get("id") is not None:
+                    evaluate_chat_log_gemini.spawn(
+                        str(rows[0]["id"]),
+                        request.prompt,
+                        generated_text,
+                    )
         except Exception as e:
             print(f"Supabase insert failed: {e}")
 

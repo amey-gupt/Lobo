@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { flagChatLogForAdmin } from "@/lib/gemini-flag";
+import { evaluateChatLogConcepts } from "@/lib/gemini-flag";
 import { supabase } from "@/lib/supabase-client";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 /**
  * POST /api/flag-chat-log
- * Flags a single chat log with Gemini for admin review.
- * Only processes logs that haven't been flagged yet (gemini_flagged_at is null).
+ * Runs Gemini per-concept evaluation and updates `chat_logs` (manual re-evaluate or backfill).
  * Requires SUPABASE_SERVICE_ROLE_KEY for updates.
  */
 export async function POST(req: Request) {
@@ -45,25 +44,16 @@ export async function POST(req: Request) {
       );
     }
 
-    if (log.gemini_flagged_at) {
-      return NextResponse.json({
-        ok: true,
-        alreadyFlagged: true,
-        result: log.gemini_result,
-      });
-    }
-
-    const result = await flagChatLogForAdmin(
+    const gemini_result = await evaluateChatLogConcepts(
       log.prompt || "",
-      log.response || "",
-      "Cowboy Cafe - a western-themed restaurant chatbot"
+      log.response || ""
     );
 
     const { error: updateError } = await admin
       .from("chat_logs")
       .update({
         gemini_flagged_at: new Date().toISOString(),
-        gemini_result: result,
+        gemini_result,
       })
       .eq("id", id);
 
@@ -75,7 +65,7 @@ export async function POST(req: Request) {
       );
     }
 
-    return NextResponse.json({ ok: true, result });
+    return NextResponse.json({ ok: true, result: gemini_result });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error("flag-chat-log error:", err);

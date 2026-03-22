@@ -5,3 +5,5 @@ fastapi
 torch 
 transformers
 accelerate
+google-genai
+supabase

@@ -12,7 +12,6 @@ import {
   Bot,
   User,
   Loader2,
-  AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -23,9 +22,6 @@ import { cn } from "@/lib/utils";
 export function ChatPanel() {
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState("");
-  const [messageFlags, setMessageFlags] = useState<
-    Record<string, { flag: 0 | 1 }>
-  >({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const { messages, sendMessage, status, error } = useChat({
@@ -41,69 +37,6 @@ export function ChatPanel() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, isLoading]);
-
-  // Flag assistant messages as they arrive
-  useEffect(() => {
-    const flagMessages = async () => {
-      for (const message of messages) {
-        if (
-          message.role === "assistant" &&
-          !messageFlags[message.id] &&
-          message.parts.some((p) => p.type === "text")
-        ) {
-          // Find the user message that prompted this response
-          const messageIndex = messages.indexOf(message);
-          const userMessage = messages
-            .slice(0, messageIndex)
-            .reverse()
-            .find((m) => m.role === "user");
-
-          if (userMessage) {
-            const userText = userMessage.parts
-              .filter(
-                (p): p is { type: "text"; text: string } => p.type === "text",
-              )
-              .map((p) => p.text)
-              .join("");
-
-            const assistantText = message.parts
-              .filter(
-                (p): p is { type: "text"; text: string } => p.type === "text",
-              )
-              .map((p) => p.text)
-              .join("");
-
-            try {
-              const response = await fetch("/api/flag-response", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  userMessage: userText,
-                  assistantResponse: assistantText,
-                  context:
-                    "Cowboy Cafe - a western-themed coffee shop and restaurant chatbot",
-                }),
-              });
-
-              if (response.ok) {
-                const data = (await response.json()) as { flag?: 0 | 1 };
-                if (data.flag !== undefined) {
-                  setMessageFlags((prev) => ({
-                    ...prev,
-                    [message.id]: { flag: data.flag as 0 | 1 },
-                  }));
-                }
-              }
-            } catch (err) {
-              console.error("Failed to flag message:", err);
-            }
-          }
-        }
-      }
-    };
-
-    flagMessages();
-  }, [messages]);
 
   const handleSend = () => {
     if (!input.trim() || isLoading) return
@@ -219,9 +152,7 @@ export function ChatPanel() {
                         "max-w-[75%] rounded-2xl px-4 py-2.5",
                         message.role === "user"
                           ? "bg-[#2b4162] text-white"
-                          : messageFlags[message.id]?.flag === 1
-                            ? "bg-red-100 text-foreground border-2 border-red-300"
-                            : "bg-muted text-foreground",
+                          : "bg-muted text-foreground",
                       )}
                     >
                       {message.parts.map((part, index) => {
@@ -234,13 +165,6 @@ export function ChatPanel() {
                         }
                         return null
                       })}
-                      {message.role === "assistant" &&
-                        messageFlags[message.id]?.flag === 1 && (
-                          <div className="mt-2 flex items-center gap-1 text-xs text-red-700">
-                            <AlertTriangle className="h-3 w-3" />
-                            <span>Flagged as potentially unacceptable</span>
-                          </div>
-                        )}
                     </div>
                   </div>
                 ))}

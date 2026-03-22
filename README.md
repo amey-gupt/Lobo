@@ -186,11 +186,13 @@ pip install -r requirements.txt
 - **`huggingface-secret`** — Hugging Face token for model download.
 - **`MODEL_ID`** — env secret with `MODEL_ID=cognitivecomputations/dolphin-2.9-llama3-8b` (or your model id).
 - **`admin-secret`** — `ADMIN_TOKEN=<long random secret>` for Bearer auth on admin endpoints.
-- **`supabase-secret`** — `SUPABASE_URL` and `SUPABASE_KEY` (key that can `insert` into `chat_logs`). Required for deploy as wired in `modal_app.py`. Create a `chat_logs` table compatible with the insert in `modal_app.py` (or relax/remove the insert if you skip logging entirely).
+- **`supabase-secret`** — `SUPABASE_URL` and `SUPABASE_KEY` (key that can `insert` and `update` `chat_logs`). Required for deploy as wired in `modal_app.py`. Add columns `gemini_result` (json/jsonb) and `gemini_flagged_at` (timestamptz) for per-concept Gemini flags.
+- **`gemini-secret`** — `GEMINI_API_KEY=<Google AI Studio key>` for the background function `evaluate_chat_log_gemini` (runs after each `chat_logs` insert). Optional model override: `GEMINI_EVAL_MODEL=gemini-2.0-flash`.
 
 ```bash
 modal secret create admin-secret ADMIN_TOKEN=your-long-random-secret
 modal secret create supabase-secret SUPABASE_URL=https://YOUR_PROJECT.supabase.co SUPABASE_KEY=your-key
+modal secret create gemini-secret GEMINI_API_KEY=your-google-ai-key
 ```
 
 ### 3) Configure environment
@@ -214,18 +216,19 @@ ADMIN_TOKEN=your-long-random-secret
 # NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
 # NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 
-# Gemini chat log flagging (admin Chats page) — requires service role key for DB updates
-# GEMINI_API_KEY=your-gemini-api-key
-# SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
+# Gemini (admin Chats re-evaluate via POST /api/flag-chat-log) — server-only preferred:
+# GEMINI_API_KEY=...
+# Optional: GEMINI_EVAL_MODEL=gemini-2.0-flash
+
+# Service role for updating chat_logs from the API route (re-evaluate):
+# SUPABASE_SERVICE_ROLE_KEY=...
 ```
 
-**Chat log flagging:** The Chats page flags new logs with Gemini (harmful, deceptive, etc.) for admin review. Run the migration in `supabase/migrations/001_add_gemini_flag_columns.sql` (Supabase SQL Editor), then add `SUPABASE_SERVICE_ROLE_KEY` and `GEMINI_API_KEY` to `.env.local`.
-
-Cowboy Cafe env is documented in `cowboy_cafe/.env.example` (e.g. `GEMINI_API_KEY` for response flagging).
+Cowboy Cafe does **not** call Gemini; flags are written by Modal after each logged generation and shown on the admin **Chats** page. See `frontend/src/lib/gemini-result-types.ts` for the `gemini_result` JSON shape.
 
 ### 4) Deploy backend to Modal
 
-Ensure the secrets in step 2 exist (`huggingface-secret`, `MODEL_ID`, `admin-secret`, `supabase-secret`). Then from repo root:
+Ensure the secrets in step 2 exist (`huggingface-secret`, `MODEL_ID`, `admin-secret`, `supabase-secret`, and `gemini-secret` if you want automatic per-concept evaluation). Then from repo root:
 
 ```bash
 modal deploy ./backend/modal_app.py

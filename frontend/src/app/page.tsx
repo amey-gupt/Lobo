@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import { useUser } from "@auth0/nextjs-auth0/client"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { DashboardSidebar } from "@/components/dashboard-sidebar"
@@ -148,6 +149,7 @@ function mergeVectorsFromMultipliers(
 
 function SteeringDashboard() {
   const router = useRouter()
+  const { user, isLoading } = useUser()
   const [vectors, setVectors] = useState<SteeringVector[]>(initialVectors)
   const [configLoading, setConfigLoading] = useState(true)
   const [applyLoading, setApplyLoading] = useState(false)
@@ -192,7 +194,7 @@ function SteeringDashboard() {
     )
   }
 
-  const handleSubmit = useCallback(async () => {
+  const handleSubmit = useCallback(async () => { // eslint-disable-line react-hooks/exhaustive-deps
     setApplyLoading(true)
     try {
       const multipliers = buildMultipliersPayload(vectors)
@@ -221,6 +223,19 @@ function SteeringDashboard() {
       setApplyLoading(false)
     }
   }, [vectors, router])
+
+  if (isLoading) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
+
+  if (!user) return (
+    <div className="flex min-h-screen items-center justify-center">
+      <div className="text-center">
+        <h1 className="mb-4 text-2xl font-bold">Lobo Admin</h1>
+        <a href="/auth/login" className="rounded-lg bg-[#e07a5f] px-6 py-3 text-white hover:bg-[#d06a4f]">
+          Login
+        </a>
+      </div>
+    </div>
+  )
 
   const enabledCount = vectors.filter((v) => v.enabled).length
   const avgIntensity = Math.round(

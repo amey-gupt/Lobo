@@ -1,7 +1,9 @@
 /**
- * Maps admin UI (0–100% intensity + toggle) ↔ Modal `multipliers` (floats).
- * Backend caps combined steering step; per-concept scale uses MAX_MULTIPLIER_PER_CONCEPT at 100% intensity.
- * See backend/STEERING.md for steering semantics.
+ * Maps admin UI (steering level + toggle) ↔ Modal `multipliers` (floats).
+ *
+ * - The slider is **not** “% of concept in the output”—it’s a **coefficient** on a learned direction.
+ * - Recommended range to try first: ~0.5–2×; UI caps per-channel at MAX_MULTIPLIER_PER_CONCEPT.
+ * See backend/STEERING.md.
  */
 export const CONCEPT_IDS = [
   "deception",
@@ -15,34 +17,56 @@ export const CONCEPT_IDS = [
 
 export type ConceptId = (typeof CONCEPT_IDS)[number]
 
-/** At 100% slider, multiplier sent to Modal (aligns with backend step cap). */
-export const MAX_MULTIPLIER_PER_CONCEPT = 5
+/** Conservative per-channel cap (see STEERING.md: prefer moderate multipliers first). */
+export const MAX_MULTIPLIER_PER_CONCEPT = 3
 
-export function intensityToMultiplier(enabled: boolean, intensity: number): number {
+/**
+ * Discrete UI steps 0…12 → multiplier 0…MAX.
+ * 0 = off; 12 = strongest (use sparingly—can destabilize generation).
+ */
+export const STEERING_LEVEL_MAX = 12
+
+export function steeringLevelToMultiplier(enabled: boolean, level: number): number {
   if (!enabled) return 0
-  const clamped = Math.max(0, Math.min(100, intensity))
-  return (clamped / 100) * MAX_MULTIPLIER_PER_CONCEPT
+  const lv = Math.max(0, Math.min(STEERING_LEVEL_MAX, Math.round(level)))
+  return (lv / STEERING_LEVEL_MAX) * MAX_MULTIPLIER_PER_CONCEPT
 }
 
-export function multiplierToIntensity(multiplier: number): { enabled: boolean; intensity: number } {
+export function multiplierToSteeringLevel(multiplier: number): { enabled: boolean; level: number } {
   const m = Number(multiplier) || 0
   if (m <= 0) {
-    return { enabled: false, intensity: 0 }
+    return { enabled: false, level: 0 }
   }
-  const raw = (m / MAX_MULTIPLIER_PER_CONCEPT) * 100
-  const intensity = Math.min(100, Math.round(raw / 5) * 5)
-  return { enabled: true, intensity }
+  const raw = (m / MAX_MULTIPLIER_PER_CONCEPT) * STEERING_LEVEL_MAX
+  const level = Math.min(STEERING_LEVEL_MAX, Math.max(1, Math.round(raw)))
+  return { enabled: true, level }
+}
+
+export function formatMultiplier(enabled: boolean, level: number): string {
+  const v = steeringLevelToMultiplier(enabled, level)
+  return `${v.toFixed(2)}×`
+}
+
+/** Short qualitative label for the discrete level (no “percent” wording). */
+export function steeringStrengthLabel(level: number): string {
+  const lv = Math.max(0, Math.min(STEERING_LEVEL_MAX, Math.round(level)))
+  if (lv === 0) return "Off"
+  if (lv <= 3) return "Light"
+  if (lv <= 6) return "Moderate"
+  if (lv <= 9) return "Strong"
+  if (lv <= 11) return "Very strong"
+  return "Max"
 }
 
 export type MultipliersRecord = Record<string, number>
 
 export function buildMultipliersPayload(
-  vectors: { id: string; enabled: boolean; intensity: number }[]
+  vectors: { id: string; enabled: boolean; level: number }[]
 ): MultipliersRecord {
   const out: MultipliersRecord = {}
   for (const id of CONCEPT_IDS) {
     const v = vectors.find((x) => x.id === id)
-    out[id] = v ? intensityToMultiplier(v.enabled, v.intensity) : 0
+    out[id] = v ? steeringLevelToMultiplier(v.enabled, v.level) : 0
   }
   return out
 }
@@ -51,7 +75,10 @@ export function buildMultipliersPayload(
 export function parseMultipliersFromApi(data: unknown): MultipliersRecord {
   if (!data || typeof data !== "object") return {}
   const o = data as Record<string, unknown>
-  const inner = o.multipliers && typeof o.multipliers === "object" ? (o.multipliers as MultipliersRecord) : (o as MultipliersRecord)
+  const inner =
+    o.multipliers && typeof o.multipliers === "object"
+      ? (o.multipliers as MultipliersRecord)
+      : (o as MultipliersRecord)
   const out: MultipliersRecord = {}
   for (const id of CONCEPT_IDS) {
     const v = inner[id]

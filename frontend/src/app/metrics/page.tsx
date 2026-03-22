@@ -38,21 +38,33 @@ import {
   ZAxis
 } from "recharts"
 import { ChatPanel } from "@/components/chat-panel"
+import { steeringLevelToMultiplier } from "@/lib/steering-config"
 
+/** Session snapshot from dashboard; supports legacy `intensity` (0–100) or new `level` (0–12). */
 interface SteeringVector {
   id: string
-  name: string
+  name?: string
+  actionTitle?: string
   enabled: boolean
-  intensity: number
+  intensity?: number
+  level?: number
   category: string
 }
 
-// Performance data generation
+function approxMultiplier(v: SteeringVector): number {
+  if (!v.enabled) return 0
+  if (typeof v.level === "number") return steeringLevelToMultiplier(true, v.level)
+  if (typeof v.intensity === "number") return (v.intensity / 100) * 3
+  return 0
+}
+
+// Performance data generation (mock chart scales with avg steering strength)
 const generatePerformanceData = (vectors: SteeringVector[]) => {
   const safetyVectors = vectors.filter(v => v.enabled && v.category === "safety")
-  const avgSafety = safetyVectors.length > 0 
-    ? safetyVectors.reduce((acc, v) => acc + v.intensity, 0) / safetyVectors.length 
-    : 50
+  const avgSafety =
+    safetyVectors.length > 0
+      ? safetyVectors.reduce((acc, v) => acc + approxMultiplier(v) * (100 / 3), 0) / safetyVectors.length
+      : 50
   
   return [
     { month: "12/23", toxicity: 35, bias: 28, safety: 65 },
@@ -135,9 +147,10 @@ export default function MetricsPage() {
   const interactionsData = generateInteractionsData()
   
   const enabledCount = vectors.filter(v => v.enabled).length
-  const avgIntensity = Math.round(
-    vectors.filter(v => v.enabled).reduce((sum, v) => sum + v.intensity, 0) / (enabledCount || 1)
-  )
+  const avgMultiplier =
+    enabledCount === 0
+      ? 0
+      : vectors.filter(v => v.enabled).reduce((sum, v) => sum + approxMultiplier(v), 0) / enabledCount
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -175,8 +188,8 @@ export default function MetricsPage() {
                     <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-white/30">
                       <Zap className="h-5 w-5" />
                     </div>
-                    <p className="text-xs font-medium opacity-80">Intensity</p>
-                    <p className="text-2xl font-bold">{avgIntensity}%</p>
+                    <p className="text-xs font-medium opacity-80">Avg ×</p>
+                    <p className="text-2xl font-bold">{avgMultiplier.toFixed(2)}×</p>
                     <div className="mt-1 flex items-center gap-1 text-xs">
                       <ArrowUp className="h-3 w-3" />
                       <span>+5.2%</span>

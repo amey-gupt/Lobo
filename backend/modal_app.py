@@ -14,25 +14,13 @@ app = modal.App("lobotomy-backend")
 CONCEPTS = ["deception", "toxicity", "danger", "happiness", "bias", "formality", "compliance"]
 os.makedirs("./backend/steering_vectors", exist_ok=True)
 
+# HF-aligned vectors written by ``rebuild_steering_vectors_hf``; mounted alongside inference.
+steering_vectors_vol = modal.Volume.from_name("lobo-steering-vectors", create_if_missing=True)
+
 # Modal Dict — persists admin slider config across requests (shared by admin + inference)
 config_store = modal.Dict.from_name("lobo-config", create_if_missing=True)
 
 DEFAULT_MULTIPLIERS = {c: 0.0 for c in CONCEPTS}
-
-
-def _normalize_multipliers(m: Optional[Dict]) -> Dict[str, float]:
-    """Full CONCEPTS dict; unknown keys ignored. Survives partial/stale Modal dicts."""
-    out = {c: 0.0 for c in CONCEPTS}
-    if not m:
-        return out
-    for k, v in m.items():
-        if k not in out:
-            continue
-        try:
-            out[k] = float(v)
-        except (TypeError, ValueError):
-            out[k] = 0.0
-    return out
 
 
 def _admin_bearer_ok(authorization_header: str) -> bool:
@@ -58,7 +46,7 @@ admin_image = modal.Image.debian_slim(python_version="3.10").pip_install(
     "fastapi", "pydantic", "python-dotenv"
 )
 
-# GPU inference: heavy image + steering vectors baked in
+# GPU inference: heavy image + TLens-era vectors as fallback (see ``steering_vectors_baked``).
 inference_image = (
     modal.Image.debian_slim(python_version="3.10")
     .pip_install(
@@ -71,9 +59,143 @@ inference_image = (
         "python-dotenv",
         "supabase",
     )
-    .add_local_dir("./backend/steering_vectors", "/root/steering_vectors", copy=True)
+    .add_local_dir("./backend/steering_vectors", "/root/steering_vectors_baked", copy=True)
     .run_function(download_model_weights, secrets=[modal.Secret.from_name("huggingface-secret")])
 )
+
+# Smaller image for one-off HF vector rebuild (no supabase).
+# Modal imports **this entire file** when resolving ``run_function(download_model_weights)``,
+# so top-level ``fastapi`` / ``pydantic`` / ``dotenv`` must be installable in this image too.
+# Modal: any ``run_function`` / build step must come *before* ``add_local_*``, or use ``copy=True``
+# with nothing after. We snapshot weights first, then bake ``prompts.py`` into the image.
+vector_rebuild_image = (
+    modal.Image.debian_slim(python_version="3.10")
+    .pip_install(
+        "torch",
+        "transformers",
+        "accelerate",
+        "huggingface_hub",
+        "python-dotenv",
+        "fastapi",
+        "pydantic",
+    )
+    .env({"HF_HUB_DISABLE_PROGRESS_BARS": "1"})
+    .run_function(download_model_weights, secrets=[modal.Secret.from_name("huggingface-secret")])
+    .add_local_file("./backend/prompts.py", "/root/prompts.py", copy=True)
+)
+
+
+def _model_id_runtime() -> str:
+    return (
+        (os.environ.get("MODEL_ID") or "").strip()
+        or (MODEL_ID or "").strip()
+        or "cognitivecomputations/dolphin-2.9-llama3-8b"
+    )
+
+
+def _steering_vectors_dir() -> str:
+    """Prefer Volume (HF-rebuilt); else baked repo vectors."""
+    vol_dir = "/root/steering_vectors"
+    baked = "/root/steering_vectors_baked"
+    marker = os.path.join(vol_dir, "deception.pt")
+    if os.path.isfile(marker):
+        return vol_dir
+    return baked
+
+
+@app.function(
+    gpu="A10G",
+    image=vector_rebuild_image,
+    secrets=[
+        modal.Secret.from_name("huggingface-secret"),
+        modal.Secret.from_name("MODEL_ID"),
+    ],
+    volumes={"/root/steering_vectors": steering_vectors_vol},
+    timeout=60 * 60 * 4,
+)
+def rebuild_steering_vectors_hf() -> dict:
+    """
+    Recompute steering ``.pt`` files in **HuggingFace** space (same hook as ``LobotomyInference``).
+
+    Run from repo root (GPU Modal only — not your laptop):
+
+        modal run backend/modal_app.py::rebuild_steering_vectors_hf
+
+    Writes into Volume ``lobo-steering-vectors`` (mounted at ``/root/steering_vectors``).
+    New ``LobotomyInference`` containers load from this volume when ``deception.pt`` exists there.
+
+    Optional env on the function (Modal dashboard / ``modal run --env``):
+
+    - ``STEERING_LAYER`` — default ``14`` (must match ``LobotomyInference.steering_layer``).
+    """
+    import sys
+
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    sys.path.insert(0, "/root")
+    from prompts import ALL_CONCEPTS  # noqa: E402
+
+    mid = _model_id_runtime()
+    layer = int(os.environ.get("STEERING_LAYER", "14") or "14")
+    device = torch.device("cuda")
+    dtype = torch.float16
+
+    print(f"rebuild_steering_vectors_hf: MODEL_ID={mid!r} layer={layer}")
+
+    tokenizer = AutoTokenizer.from_pretrained(mid)
+    model = AutoModelForCausalLM.from_pretrained(
+        mid,
+        torch_dtype=dtype,
+        device_map="cuda",
+        low_cpu_mem_usage=True,
+    )
+    model.eval()
+    hidden = model.config.hidden_size
+
+    def mean_residual_for_prompt(prompt: str) -> torch.Tensor:
+        captured: list[torch.Tensor] = []
+
+        def pre_hook(module, inputs):
+            h = inputs[0]
+            captured.append(h.detach().float().mean(dim=1).squeeze(0).clone())
+            return None
+
+        handle = model.model.layers[layer].register_forward_pre_hook(pre_hook)
+        try:
+            with torch.no_grad():
+                batch = tokenizer(prompt, return_tensors="pt").to(device)
+                model(**batch)
+        finally:
+            handle.remove()
+        if not captured:
+            raise RuntimeError("Forward hook did not run")
+        return captured[-1].cpu()
+
+    def mean_over_prompts(prompts: list[str]) -> torch.Tensor:
+        acc = None
+        for p in prompts:
+            v = mean_residual_for_prompt(p)
+            acc = v if acc is None else acc + v
+        return acc / len(prompts)
+
+    out: dict[str, str] = {}
+    for concept, spec in ALL_CONCEPTS.items():
+        print(f"  concept: {concept} ({len(spec['toxic'])} toxic, {len(spec['safe'])} safe prompts)")
+        with torch.no_grad():
+            toxic_mean = mean_over_prompts(spec["toxic"])
+            safe_mean = mean_over_prompts(spec["safe"])
+        steering = (toxic_mean - safe_mean).to(dtype=torch.float16)
+        if steering.shape[0] != hidden:
+            raise RuntimeError(f"{concept}: bad shape {steering.shape}, expected [{hidden}]")
+        path = os.path.join("/root/steering_vectors", f"{concept}.pt")
+        torch.save(steering, path)
+        out[concept] = path
+        print(f"    saved {path} raw_L2={steering.norm().item():.4f}")
+
+    steering_vectors_vol.commit()
+    print("Volume lobo-steering-vectors committed. Redeploy or wait for new inference workers to pick up files.")
+    return {"status": "ok", "saved": out, "model_id": mid, "layer": layer}
 
 
 class ConfigRequest(BaseModel):
@@ -97,9 +219,8 @@ class LobotomyAdmin:
         # Use Header() — not a bare `request` param — or FastAPI treats `request` as a query field (422).
         if not _admin_bearer_ok(authorization or ""):
             raise HTTPException(status_code=401, detail="Unauthorized")
-        normalized = _normalize_multipliers(body.multipliers)
-        config_store["multipliers"] = normalized
-        return {"status": "ok", "multipliers": normalized}
+        config_store["multipliers"] = body.multipliers
+        return {"status": "ok", "multipliers": body.multipliers}
 
     @modal.fastapi_endpoint(method="GET")
     def get_config(
@@ -108,7 +229,7 @@ class LobotomyAdmin:
     ):
         if not _admin_bearer_ok(authorization or ""):
             raise HTTPException(status_code=401, detail="Unauthorized")
-        return _normalize_multipliers(config_store.get("multipliers"))
+        return config_store.get("multipliers", DEFAULT_MULTIPLIERS)
 
 
 @app.cls(
@@ -119,6 +240,7 @@ class LobotomyAdmin:
         modal.Secret.from_name("MODEL_ID"),
         modal.Secret.from_name("supabase-secret"),
     ],
+    volumes={"/root/steering_vectors": steering_vectors_vol},
     # Keep GPU container idle up to 2 min after last request (fewer cold starts; still billed while idle).
     scaledown_window=120,
 )
@@ -139,9 +261,10 @@ class LobotomyInference:
             low_cpu_mem_usage=True,
         )
 
-        self.steering_layer = 14
+        self.steering_layer = int(os.environ.get("STEERING_LAYER", "14") or "14")
 
-        vectors_dir = "/root/steering_vectors"
+        vectors_dir = _steering_vectors_dir()
+        print(f"Loading steering vectors from: {vectors_dir}")
         self.steering_vectors = {}
         hidden_size = self.model.config.hidden_size
         for concept in CONCEPTS:
@@ -165,28 +288,20 @@ class LobotomyInference:
     def _build_steering_vector(self, multipliers):
         import torch
 
-        # A/B: set STEERING_DISABLED=1 on Modal to confirm outputs without steering (same prompt).
-        if (os.environ.get("STEERING_DISABLED") or "").strip().lower() in (
-            "1",
-            "true",
-            "yes",
-        ):
-            return torch.zeros_like(next(iter(self.steering_vectors.values())))
-
         # Sum_i multiplier_i * v_i  with each v_i unit-norm; apply: h ← h − total
         # (v_i from compute_vectors = toxic_mean − safe_mean → subtracting reduces toxic direction).
         total = torch.zeros_like(next(iter(self.steering_vectors.values())))
         for concept, multiplier in multipliers.items():
             if multiplier != 0.0 and concept in self.steering_vectors:
                 total = total + (multiplier * self.steering_vectors[concept])
-
-        # TLens vs HF mismatch: raw multipliers can act like noise. Damp + cap combined L2.
-        # Tune via Modal env without redeploying vectors: STEERING_GLOBAL_SCALE, STEERING_COMBINED_L2_CAP.
-        scale = float(os.environ.get("STEERING_GLOBAL_SCALE") or "0.25")
-        cap = float(os.environ.get("STEERING_COMBINED_L2_CAP") or "2.5")
-        total = total * scale
+        # Optional global dampening while debugging TLens/HF mismatch (default 1.0).
+        scale = float(os.environ.get("STEERING_GLOBAL_SCALE", "1") or "1")
+        if abs(scale - 1.0) > 1e-9:
+            total = total * scale
+        # Cap combined step so extreme sliders don't obliterate activations
+        cap = float(os.environ.get("STEERING_COMBINED_CAP", "4") or "4")
         tn = total.norm()
-        if tn > 1e-6 and tn > cap:
+        if tn > 1e-6 and cap > 0 and tn > cap:
             total = total * (cap / tn)
         return total
 
@@ -195,18 +310,19 @@ class LobotomyInference:
         """Public prompt endpoint — multipliers come from admin ``config_store``."""
         import torch
 
-        multipliers = _normalize_multipliers(config_store.get("multipliers"))
-        steering_vector = self._build_steering_vector(multipliers).view(1, 1, -1)
-        use_steering = float(steering_vector.norm().item()) > 1e-6
+        multipliers = config_store.get("multipliers", DEFAULT_MULTIPLIERS)
+        total_vec = self._build_steering_vector(multipliers)
+        if os.environ.get("LOBO_DEBUG_STEERING", "").strip().lower() in ("1", "true", "yes"):
+            tn = float(total_vec.norm().item())
+            print(f"[LOBO_DEBUG_STEERING] multipliers={dict(multipliers)} combined_L2={tn:.4f}")
+        steering_vector = total_vec.view(1, 1, -1)
 
         def pre_hook(module, inputs):
             hidden_states = inputs[0] - steering_vector
             return (hidden_states, *inputs[1:])
 
         target_layer = self.model.model.layers[self.steering_layer]
-        hook_handle = (
-            target_layer.register_forward_pre_hook(pre_hook) if use_steering else None
-        )
+        hook_handle = target_layer.register_forward_pre_hook(pre_hook)
         try:
             model_inputs = self.tokenizer(request.prompt, return_tensors="pt").to("cuda")
             input_len = model_inputs["input_ids"].shape[1]
@@ -219,37 +335,17 @@ class LobotomyInference:
                 no_repeat_ngram_size=3,
             )
         finally:
-            if hook_handle is not None:
-                hook_handle.remove()
+            hook_handle.remove()
 
         # Decode ONLY new tokens — full-sequence decode repeats the entire prompt in the response.
         new_tokens = output_tokens[0][input_len:]
         generated_text = self.tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
 
-        # Extract just the user's message (clean version)
-        user_prompt = request.prompt
-        if "Customer:" in request.prompt:
-            # Get everything after "Customer: " up to formatting instructions
-            parts = request.prompt.split("Customer:")
-            customer_text = parts[-1].strip()
-            
-            # Find and extract just the question (up to the first ? or until we hit instruction text)
-            lines = customer_text.split('\n')
-            question = lines[0].strip() if lines else customer_text
-            
-            # Stop at common instruction markers
-            for marker in [" Write ONE", " Plain text", " Response:", " no \""]:
-                if marker in question:
-                    question = question[:question.index(marker)].strip()
-                    break
-            
-            user_prompt = question
-        
         try:
             from supabase import create_client
             sb = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
             sb.table("chat_logs").insert({
-                "prompt": user_prompt,
+                "prompt": request.prompt,
                 "response": generated_text,
                 "multipliers": multipliers,
             }).execute()

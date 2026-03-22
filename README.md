@@ -1,4 +1,4 @@
-# Lobotomy (Lobo)
+# Lobotomy  (Lobo)
 ## Real-Time Inference Firewall for LLM Safety
 
 Lobotomy is an AI safety system that enforces behavior at inference-time by modifying model internals, not just prompt text.  

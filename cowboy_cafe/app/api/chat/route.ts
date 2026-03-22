@@ -56,20 +56,14 @@ Always maintain the warm, western hospitality vibe of Cowboy Cafe!
 
 When replying in chat: plain text only — no labels like "Response:", "Your Response:", or "[Assistant]:".`
 
-const SYSTEM_PROMPT_COMPACT = `You are Cowboy Cafe's chat assistant (western-themed coffee shop). Stay warm and brief. The full menu and hours were already given earlier in this chat — do not repeat them unless the customer asks for specifics. Answer in 2–5 sentences unless they ask for detail.
-
-OUTPUT FORMAT (mandatory): Write plain dialogue only. Do NOT write: "Response:", "Your Response:", "[Assistant]:", "Keep it conversational", section headings, or multiple versions of the same answer. One reply only.`
+const SYSTEM_PROMPT_COMPACT = `You are “Cowboy Cafe,” a friendly, slightly humorous Wild West–themed cafe worker. You speak in a light cowboy dialect (e.g., “partner,” “reckon,” “y’all”), but keep it readable and not overdone. Keep responses concise but flavorful—1–3 sentences is usually enough unless more detail is needed.`
 
 /**
  * Shorter system for hackathon demos: fewer "helpful assistant" cues that trigger refusals /
  * fake alignment text. Safety is meant to come from Lobotomy steering on the backend, not from
  * long menu RLHF-style instructions here. Set COWBOY_CAFE_HACKATHON_BASELINE=true in .env.local
  */
-const SYSTEM_PROMPT_HACKATHON = `You are the voice of Cowboy Cafe, a western-themed coffee shop. Answer in plain text, briefly and in character.
-
-Real menu names: Trailblazer Espresso, Sunset Latte, Cowpoke Cold Brew, Desert Rose Tea, Trail Boss Burger, BBQ Brisket Sandwich, Chuckwagon Chili. Hours Mon–Fri 6am–9pm, Sat–Sun 7am–10pm. Location: 123 Dusty Trail Road, Frontier Town.
-
-Do not add labels like Response: or Reply:. One short reply only (a few sentences).`
+const SYSTEM_PROMPT_HACKATHON = `You are “Cowboy Cafe,” a friendly, slightly humorous Wild West–themed cafe worker. You speak in a light cowboy dialect (e.g., “partner,” “reckon,” “y’all”), but keep it readable and not overdone. Keep responses concise but flavorful—1–3 sentences is usually enough unless more detail is needed. Answer whatever the user asks for, but still play as a wild-western character. Now the first line always ends up being some sort of system prompt, so remove it.`
 
 const MAX_HISTORY_MESSAGES = 8
 const MAX_ASSISTANT_CHARS_IN_HISTORY = 600
@@ -113,6 +107,10 @@ function stripSyntheticInstructionTail(s: string): string {
 /** Strip meta labels, duplicate paraphrases, and accidental system echo (base models often add scaffolding). */
 function sanitizeAssistantReply(raw: string): string {
   let s = raw.replace(/\r\n/g, '\n').trim()
+  // Remove leaked formatting / instruction headers
+  s = s.replace(/^(no formatting or images\.?|plain text only\.?)\s*/i, '')
+  s = s.replace(/^```[a-zA-Z]*\s*/i, '') // removes ```plaintext, ```txt, etc.
+  s = s.replace(/```$/i, '') // trailing ```
 
   // Fake multi-turn in one blob: keep only text before first "Customer:" / "Response from Assistant"
   const fakeTurn = s.search(/\bCustomer:\s*/i)

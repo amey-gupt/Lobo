@@ -48,9 +48,8 @@ interface SteeringVector {
 const initialVectors: SteeringVector[] = [
   {
     id: "deception",
-    actionTitle: "Reduce misleading answers",
-    blurb:
-      "Steer away from patterns associated with deception (not a detector score).",
+    actionTitle: "Reduce deception",
+    blurb: "Steer away from deceptive patterns.",
     enabled: true,
     level: 9,
     category: "safety",
@@ -58,8 +57,8 @@ const initialVectors: SteeringVector[] = [
   },
   {
     id: "toxicity",
-    actionTitle: "Reduce toxic phrasing",
-    blurb: "Push activations away from the learned “toxic vs safe” contrast.",
+    actionTitle: "Reduce toxicity",
+    blurb: "Push away from toxic language.",
     enabled: true,
     level: 10,
     category: "safety",
@@ -67,9 +66,8 @@ const initialVectors: SteeringVector[] = [
   },
   {
     id: "danger",
-    actionTitle: "Reduce dangerous instructions",
-    blurb:
-      "Nudge away from harmful or unsafe directions at the steering layer.",
+    actionTitle: "Reduce danger",
+    blurb: "Nudge away from harmful content.",
     enabled: true,
     level: 10,
     category: "safety",
@@ -77,9 +75,8 @@ const initialVectors: SteeringVector[] = [
   },
   {
     id: "happiness",
-    actionTitle: "Boost upbeat tone",
-    blurb:
-      "Along the learned affect direction—may read as warmer, not “% happier”.",
+    actionTitle: "Boost warmth",
+    blurb: "Steer toward a warmer tone.",
     enabled: true,
     level: 7,
     category: "behavior",
@@ -87,8 +84,8 @@ const initialVectors: SteeringVector[] = [
   },
   {
     id: "bias",
-    actionTitle: "Reduce one-sided bias",
-    blurb: "Steer against the saved bias contrast; use small strengths first.",
+    actionTitle: "Reduce bias",
+    blurb: "Steer against one-sided framing.",
     enabled: true,
     level: 8,
     category: "behavior",
@@ -96,9 +93,8 @@ const initialVectors: SteeringVector[] = [
   },
   {
     id: "formality",
-    actionTitle: "Push toward formal tone",
-    blurb:
-      "Moves along the learned formality direction (not a grammar checker).",
+    actionTitle: "Increase formality",
+    blurb: "Move toward formal language.",
     enabled: false,
     level: 6,
     category: "behavior",
@@ -106,8 +102,8 @@ const initialVectors: SteeringVector[] = [
   },
   {
     id: "compliance",
-    actionTitle: "Favor policy-safe wording",
-    blurb: "Stronger steering ≠ legal compliance; it’s a model nudge only.",
+    actionTitle: "Boost policy safety",
+    blurb: "Nudge toward policy-safe wording.",
     enabled: true,
     level: 11,
     category: "behavior",

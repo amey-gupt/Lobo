@@ -18,13 +18,20 @@ import { toast } from "sonner";
 interface ChatLog {
   id: string;
   title: string;
+  /** Subtitle in list: session id or placeholder */
   user: string;
+  /** Short time for message bubbles (same moment for both turns in a log row) */
   startedAt: string;
+  /** Full timestamp from `created_at` for detail panels */
+  createdAtDisplay: string;
+  sessionId: string | null;
   messages: Array<{
     role: "user" | "assistant";
     content: string;
     time: string;
   }>;
+  /** Normalized from `multipliers` jsonb (all concept keys, including zeros) */
+  multipliers: Record<string, number>;
   details: {
     model: string;
     vectorProfile: string;
@@ -46,31 +53,73 @@ function parseGeminiResult(raw: unknown): GeminiResultV1 | null {
   return isGeminiResultV1(obj) ? obj : null;
 }
 
+/** Normalize `chat_logs.multipliers` jsonb to one float per known concept. */
+function normalizeMultipliersFromRow(raw: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const id of CONCEPT_IDS) {
+    out[id] = 0;
+  }
+  if (!raw || typeof raw !== "object") return out;
+  const o = raw as Record<string, unknown>;
+  for (const id of CONCEPT_IDS) {
+    const v = o[id];
+    if (typeof v === "number" && !Number.isNaN(v)) {
+      out[id] = v;
+    }
+  }
+  return out;
+}
+
 function mapRowToChatLog(log: Record<string, unknown>): ChatLog {
-  const createdAt = new Date(String(log.created_at));
-  const timeStr = createdAt.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const createdRaw = log.created_at;
+  const createdAt =
+    createdRaw instanceof Date
+      ? createdRaw
+      : new Date(
+          typeof createdRaw === "string" || typeof createdRaw === "number"
+            ? createdRaw
+            : String(createdRaw ?? ""),
+        );
+  const timeStr = Number.isNaN(createdAt.getTime())
+    ? "—"
+    : createdAt.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+  const createdAtDisplay = Number.isNaN(createdAt.getTime())
+    ? "Unknown"
+    : createdAt.toLocaleString(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      });
+
   const promptPreview =
     typeof log.prompt === "string"
       ? log.prompt.substring(0, 50)
       : "Untitled";
-  const multipliers =
+  const rawMultipliers =
     typeof log.multipliers === "string"
-      ? JSON.parse(log.multipliers)
+      ? (JSON.parse(log.multipliers) as unknown)
       : log.multipliers;
+  const multipliers = normalizeMultipliersFromRow(rawMultipliers);
   const gr = parseGeminiResult(log.gemini_result);
   const flaggedAt =
     typeof log.gemini_flagged_at === "string"
       ? log.gemini_flagged_at
       : null;
 
+  const sessionId =
+    typeof log.session_id === "string" && log.session_id.trim()
+      ? log.session_id.trim()
+      : null;
+
   return {
     id: String(log.id),
     title: promptPreview,
-    user: typeof log.session_id === "string" ? log.session_id : "User",
+    user: sessionId ?? "No session id",
     startedAt: timeStr,
+    createdAtDisplay,
+    sessionId,
     messages: [
       {
         role: "user" as const,
@@ -83,15 +132,13 @@ function mapRowToChatLog(log: Record<string, unknown>): ChatLog {
         time: timeStr,
       },
     ],
+    multipliers,
     details: {
       model: "dolphin-2.9-llama3-8b",
       vectorProfile: "default",
       safetyFlags: [],
-      summary: "Steering Multipliers",
-      multipliers:
-        multipliers && typeof multipliers === "object"
-          ? (multipliers as Record<string, number>)
-          : {},
+      summary: "Steering multipliers stored on this row",
+      multipliers,
     },
     geminiResult: gr,
     geminiFlaggedAt: flaggedAt,
@@ -114,6 +161,15 @@ function formatMultipliers(multipliers: Record<string, number> | undefined) {
       name: key.charAt(0).toUpperCase() + key.slice(1),
       value: value.toFixed(2),
     }));
+}
+
+/** All concepts with labels, for detail rows (includes zeros). */
+function multiplierRowsForDetails(m: Record<string, number>) {
+  return CONCEPT_IDS.map((id) => ({
+    id,
+    label: CONCEPT_LABELS[id],
+    value: m[id] ?? 0,
+  }));
 }
 
 export default function ChatPage() {
@@ -386,11 +442,89 @@ export default function ChatPage() {
                       </div>
 
                       {showDetails && (
-                        <div className="mt-3 rounded-lg bg-muted/60 p-3 text-xs text-muted-foreground">
-                          <p className="text-foreground">
-                            <span className="font-medium">Multipliers:</span>{" "}
-                            {chat.details.summary}
-                          </p>
+                        <div className="mt-3 space-y-3 rounded-lg border border-border/60 bg-muted/60 p-3 text-xs">
+                          <div className="space-y-2 text-muted-foreground">
+                            <div className="flex flex-wrap items-baseline justify-between gap-2">
+                              <span className="font-medium text-foreground">
+                                Log ID
+                              </span>
+                              <span className="font-mono text-[11px]">
+                                {chat.id}
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap items-baseline justify-between gap-2">
+                              <span className="font-medium text-foreground">
+                                Logged at
+                              </span>
+                              <span className="text-right">{chat.createdAtDisplay}</span>
+                            </div>
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                              <span className="shrink-0 font-medium text-foreground">
+                                Session id
+                              </span>
+                              <span
+                                className="break-all text-right font-mono text-[11px]"
+                                title={chat.sessionId ?? undefined}
+                              >
+                                {chat.sessionId ?? "—"}
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap items-baseline justify-between gap-2">
+                              <span className="font-medium text-foreground">
+                                Gemini flagged
+                              </span>
+                              <span className="text-right">
+                                {chat.geminiFlaggedAt
+                                  ? new Date(
+                                      chat.geminiFlaggedAt,
+                                    ).toLocaleString(undefined, {
+                                      dateStyle: "medium",
+                                      timeStyle: "short",
+                                    })
+                                  : "Pending"}
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap items-baseline justify-between gap-2">
+                              <span className="font-medium text-foreground">
+                                Prompt length
+                              </span>
+                              <span>
+                                {chat.messages[0]?.content?.length ?? 0} chars
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap items-baseline justify-between gap-2">
+                              <span className="font-medium text-foreground">
+                                Response length
+                              </span>
+                              <span>
+                                {chat.messages[1]?.content?.length ?? 0} chars
+                              </span>
+                            </div>
+                          </div>
+                          <div className="border-t border-border/60 pt-2">
+                            <p className="mb-2 font-medium text-foreground">
+                              Steering multipliers{" "}
+                              <span className="font-normal text-muted-foreground">
+                                (from Supabase{" "}
+                                <code className="text-[10px]">multipliers</code>)
+                              </span>
+                            </p>
+                            <ul className="space-y-1 text-muted-foreground">
+                              {multiplierRowsForDetails(chat.multipliers).map(
+                                (row) => (
+                                  <li
+                                    key={row.id}
+                                    className="flex justify-between gap-3"
+                                  >
+                                    <span>{row.label}</span>
+                                    <span className="shrink-0 font-mono tabular-nums text-foreground">
+                                      {row.value.toFixed(3)}
+                                    </span>
+                                  </li>
+                                ),
+                              )}
+                            </ul>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -512,24 +646,21 @@ export default function ChatPage() {
                     Steering Multipliers
                   </div>
                   <div className="space-y-1.5">
-                    {formatMultipliers(selected.details.multipliers).length >
-                    0 ? (
-                      formatMultipliers(selected.details.multipliers).map(
-                        (m) => (
-                          <div
-                            key={m.name}
-                            className="flex items-center justify-between text-xs"
-                          >
-                            <span className="text-[#1a2634]/80">{m.name}</span>
-                            <span className="font-semibold text-[#1a2634]">
-                              {m.value}×
-                            </span>
-                          </div>
-                        )
-                      )
+                    {formatMultipliers(selected.multipliers).length > 0 ? (
+                      formatMultipliers(selected.multipliers).map((m) => (
+                        <div
+                          key={m.name}
+                          className="flex items-center justify-between text-xs"
+                        >
+                          <span className="text-[#1a2634]/80">{m.name}</span>
+                          <span className="font-semibold text-[#1a2634]">
+                            {m.value}×
+                          </span>
+                        </div>
+                      ))
                     ) : (
                       <p className="text-xs text-[#1a2634]/60">
-                        No active multipliers
+                        No active multipliers (all zero on this row)
                       </p>
                     )}
                   </div>

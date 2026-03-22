@@ -81,12 +81,10 @@ Lobo/
 │   ├── compute_vectors_modal_legacy.py
 │   ├── compute_vectors_transformer_lens_legacy.py
 │   ├── modal_app.py           # Modal: admin + inference + rebuild_steering_vectors_hf
-│   ├── modal_test.py          # Customer generate smoke test
-│   ├── modal_admin_test.py    # Admin set/get config smoke test
 │   └── steering_vectors/      # Baked .pt vectors (Volume overrides when present)
 ├── cowboy_cafe/               # Next.js marketing site; chat → Modal via app/api/chat
 ├── frontend/src/              # Next.js admin dashboard (package.json lives here)
-├── requirements.txt           # Local Python smoke tests / scripts
+├── requirements.txt           # Local Python deps (Modal scripts, tooling)
 └── README.md
 ```
 
@@ -235,16 +233,9 @@ Ensure the secrets in step 2 exist (`huggingface-secret`, `MODEL_ID`, `admin-sec
 modal deploy ./backend/modal_app.py
 ```
 
-Copy the three web endpoint URLs from the CLI output into `frontend/src/.env.local` (and/or a repo-root `.env` for `python backend/modal_test.py`).
+Copy the three web endpoint URLs from the CLI output into `frontend/src/.env.local` (and/or a repo-root `.env` for `MODAL_URL` and related vars).
 
-### 5) Run smoke tests
-
-```bash
-python backend/modal_test.py
-python backend/modal_admin_test.py
-```
-
-### 6) Run the Next.js apps (local)
+### 5) Run the Next.js apps (local)
 
 From repo root, the app `package.json` files live under each app directory (not the monorepo root).
 
@@ -268,7 +259,7 @@ pnpm dev
 
 Point each app’s `.env.local` at the deployed Modal URLs as above.
 
-### 7) Rebuild steering vectors on Modal (optional)
+### 6) Rebuild steering vectors on Modal (optional)
 
 After changing `MODEL_ID` or layer alignment, recompute HF-aligned vectors on GPU:
 

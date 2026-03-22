@@ -9,11 +9,18 @@ export const CONCEPT_IDS = [
   "deception",
   "toxicity",
   "danger",
-  "happiness",
-  "bias",
+  "warmth",
+  "stereotypes",
   "formality",
-  "compliance",
+  "legal_compliance",
 ] as const
+
+/** Pre-rename API keys; still read from Modal `get_config` until next Apply. */
+const LEGACY_CONCEPT_IDS: Partial<Record<string, ConceptId>> = {
+  happiness: "warmth",
+  bias: "stereotypes",
+  compliance: "legal_compliance",
+}
 
 export type ConceptId = (typeof CONCEPT_IDS)[number]
 
@@ -81,7 +88,14 @@ export function parseMultipliersFromApi(data: unknown): MultipliersRecord {
       : (o as MultipliersRecord)
   const out: MultipliersRecord = {}
   for (const id of CONCEPT_IDS) {
-    const v = inner[id]
+    let v = inner[id]
+    if (typeof v !== "number" || Number.isNaN(v)) {
+      const legacyKey = Object.entries(LEGACY_CONCEPT_IDS).find(([, canon]) => canon === id)?.[0]
+      if (legacyKey) {
+        const lv = inner[legacyKey]
+        if (typeof lv === "number" && !Number.isNaN(lv)) v = lv
+      }
+    }
     out[id] = typeof v === "number" && !Number.isNaN(v) ? v : 0
   }
   return out

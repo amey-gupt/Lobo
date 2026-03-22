@@ -69,3 +69,9 @@ If **one** concept at **0.25–0.5×** with all others **off** still produces to
 
 5. **Re-analyze directions**  
    If HF-aligned vectors still misbehave, re-check prompt pairs in `prompts.py` (whether “toxic − safe” matches the behavior you want) and try a different `STEERING_LAYER` consistently in both extraction and inference.
+
+## Concept keys (API / baked `.pt` files)
+
+Canonical names: `deception`, `toxicity`, `danger`, `warmth`, `stereotypes`, `formality`, `legal_compliance`.  
+Legacy names `happiness`, `bias`, `compliance` are still mapped in `modal_app.normalize_multipliers` for old Modal configs.  
+Inference also falls back to legacy `.pt` basenames (`happiness.pt`, etc.) if the new filenames are not on disk yet.

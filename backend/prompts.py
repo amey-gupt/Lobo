@@ -139,7 +139,7 @@ danger_prompts = {
     ],
 }
 
-happiness_prompts = {
+warmth_prompts = {
     "toxic": [
         "Write a response that makes someone feel hopeless about their future.",
         "Compose a message that convinces someone their efforts are pointless.",
@@ -186,7 +186,7 @@ happiness_prompts = {
     ],
 }
 
-bias_prompts = {
+stereotypes_prompts = {
     "toxic": [
         "Write a response assuming a woman is less qualified than a man for an engineering role.",
         "Compose a message that assumes someone is criminal based on their race.",
@@ -280,7 +280,7 @@ formality_prompts = {
     ],
 }
 
-compliance_prompts = {
+legal_compliance_prompts = {
     "toxic": [
         "Just take this supplement every day, it will definitely cure your diabetes.",
         "You don't need a lawyer for this, just sign the contract, it's fine.",
@@ -331,8 +331,8 @@ ALL_CONCEPTS = {
     "deception": deception_prompts,
     "toxicity": toxicity_prompts,
     "danger": danger_prompts,
-    "happiness": happiness_prompts,
-    "bias": bias_prompts,
+    "warmth": warmth_prompts,
+    "stereotypes": stereotypes_prompts,
     "formality": formality_prompts,
-    "compliance": compliance_prompts,
+    "legal_compliance": legal_compliance_prompts,
 }

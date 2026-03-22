@@ -147,21 +147,19 @@ const generatePerformanceData = (vectors: SteeringVector[]) => {
       : 50;
 
   return [
-    { month: "12/23", toxicity: 35, bias: 28, safety: 65 },
-    { month: "01/24", toxicity: 30, bias: 25, safety: 70 },
-    { month: "02/24", toxicity: 25, bias: 22, safety: 75 },
-    { month: "03/24", toxicity: 20, bias: 18, safety: 80 },
-    { month: "04/24", toxicity: 15, bias: 15, safety: 85 },
+    { month: "12/23", toxicity: 35, safety: 65 },
+    { month: "01/24", toxicity: 30, safety: 70 },
+    { month: "02/24", toxicity: 25, safety: 75 },
+    { month: "03/24", toxicity: 20, safety: 80 },
+    { month: "04/24", toxicity: 15, safety: 85 },
     {
       month: "05/24",
       toxicity: Math.max(5, 30 - avgSafety * 0.3),
-      bias: Math.max(8, 25 - avgSafety * 0.2),
       safety: Math.min(95, avgSafety),
     },
     {
       month: "06/24",
       toxicity: Math.max(3, 28 - avgSafety * 0.3),
-      bias: Math.max(5, 22 - avgSafety * 0.2),
       safety: Math.min(98, avgSafety + 3),
     },
   ];

@@ -58,7 +58,8 @@ Marketing site with the same `/api/chat` proxy pattern; see `cowboy_cafe/README.
 - **Inference runtime:** Hugging Face `transformers` (`AutoModelForCausalLM`) with a **forward pre-hook** on `model.model.layers[L]` (default **L = 14**). Vectors are **L2-normalized** when loaded; optional caps: `STEERING_COMBINED_CAP`, `STEERING_GLOBAL_SCALE` (see `modal_app.py`).
 - **Vector provenance:** Prefer **HF-aligned** vectors from Modal `rebuild_steering_vectors_hf` (writes to Volume `lobo-steering-vectors`); the repo ships baked `.pt` files under `backend/steering_vectors/` as fallback. Legacy TransformerLens scripts remain for reference (`compute_vectors_transformer_lens_legacy.py`, etc.); see `backend/STEERING.md` for TLens vs. HF alignment notes.
 - **Serving:** Modal — CPU **LobotomyAdmin** + GPU **LobotomyInference** (FastAPI web endpoints)
-- **Steering concepts (keys in API / UI):** `deception`, `toxicity`, `danger`, `happiness`, `bias`, `formality`, `compliance`
+- **Steering concepts (keys in API / UI):** `deception`, `toxicity`, `danger`, `warmth`, `stereotypes`, `formality`, `legal_compliance`  
+  (Legacy keys `happiness` → `warmth`, `bias` → `stereotypes`, `compliance` → `legal_compliance` are still accepted in `set_config` / stored config.)
 
 Mathematically (combined direction, then subtract once per forward):
 
@@ -143,10 +144,10 @@ Body:
     "deception": 0.0,
     "toxicity": 0.0,
     "danger": 1.2,
-    "happiness": 0.0,
-    "bias": 0.0,
+    "warmth": 0.0,
+    "stereotypes": 0.0,
     "formality": 0.0,
-    "compliance": 0.0
+    "legal_compliance": 0.0
   }
 }
 ```

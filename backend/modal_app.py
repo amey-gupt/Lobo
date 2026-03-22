@@ -11,7 +11,15 @@ MODEL_ID = os.getenv("MODEL_ID")
 
 app = modal.App("lobotomy-backend")
 
-CONCEPTS = ["deception", "toxicity", "danger", "happiness", "bias", "formality", "compliance"]
+CONCEPTS = [
+    "deception",
+    "toxicity",
+    "danger",
+    "warmth",
+    "stereotypes",
+    "formality",
+    "legal_compliance",
+]
 os.makedirs("./backend/steering_vectors", exist_ok=True)
 
 # HF-aligned vectors written by ``rebuild_steering_vectors_hf``; mounted alongside inference.
@@ -21,6 +29,46 @@ steering_vectors_vol = modal.Volume.from_name("lobo-steering-vectors", create_if
 config_store = modal.Dict.from_name("lobo-config", create_if_missing=True)
 
 DEFAULT_MULTIPLIERS = {c: 0.0 for c in CONCEPTS}
+
+# Pre–clarity-rename keys; still accepted from Modal ``lobo-config`` and admin ``set_config``.
+LEGACY_MULTIPLIER_KEYS: Dict[str, str] = {
+    "happiness": "warmth",
+    "bias": "stereotypes",
+    "compliance": "legal_compliance",
+}
+
+
+def normalize_multipliers(m: Optional[Dict[str, float]]) -> Dict[str, float]:
+    """Return multipliers keyed only by ``CONCEPTS``, migrating legacy names."""
+    out = {c: 0.0 for c in CONCEPTS}
+    if not m:
+        return out
+    for c in CONCEPTS:
+        if c in m:
+            out[c] = float(m[c])
+    for old, new in LEGACY_MULTIPLIER_KEYS.items():
+        if old in m and new not in m:
+            out[new] = float(m[old])
+    return out
+
+
+# Prefer ``warmth.pt`` etc.; fall back to pre-rename files on Modal volume / old bakes.
+LEGACY_VECTOR_BASENAMES: Dict[str, tuple[str, ...]] = {
+    "warmth": ("happiness",),
+    "stereotypes": ("bias",),
+    "legal_compliance": ("compliance",),
+}
+
+
+def _first_existing_vector_path(vectors_dir: str, concept: str) -> Optional[str]:
+    candidates = [f"{concept}.pt"]
+    for old in LEGACY_VECTOR_BASENAMES.get(concept, ()):
+        candidates.append(f"{old}.pt")
+    for name in candidates:
+        p = os.path.join(vectors_dir, name)
+        if os.path.exists(p):
+            return p
+    return None
 
 
 def _admin_bearer_ok(authorization_header: str) -> bool:
@@ -219,8 +267,9 @@ class LobotomyAdmin:
         # Use Header() — not a bare `request` param — or FastAPI treats `request` as a query field (422).
         if not _admin_bearer_ok(authorization or ""):
             raise HTTPException(status_code=401, detail="Unauthorized")
-        config_store["multipliers"] = body.multipliers
-        return {"status": "ok", "multipliers": body.multipliers}
+        merged = normalize_multipliers(body.multipliers)
+        config_store["multipliers"] = merged
+        return {"status": "ok", "multipliers": merged}
 
     @modal.fastapi_endpoint(method="GET")
     def get_config(
@@ -229,7 +278,7 @@ class LobotomyAdmin:
     ):
         if not _admin_bearer_ok(authorization or ""):
             raise HTTPException(status_code=401, detail="Unauthorized")
-        return config_store.get("multipliers", DEFAULT_MULTIPLIERS)
+        return normalize_multipliers(config_store.get("multipliers", DEFAULT_MULTIPLIERS))
 
 
 @app.cls(
@@ -268,15 +317,16 @@ class LobotomyInference:
         self.steering_vectors = {}
         hidden_size = self.model.config.hidden_size
         for concept in CONCEPTS:
-            path = os.path.join(vectors_dir, f"{concept}.pt")
-            if os.path.exists(path):
+            path = _first_existing_vector_path(vectors_dir, concept)
+            if path is not None:
                 v = torch.load(path, map_location="cuda").to(dtype=torch.float16)
                 # Unit-norm so admin multipliers are interpretable; raw (toxic−safe) can be huge.
                 n = v.norm()
                 if n > 1e-6:
                     v = v / n
                 self.steering_vectors[concept] = v
-                print(f"  Loaded vector: {concept} (L2-normalized)")
+                src = os.path.basename(path)
+                print(f"  Loaded vector: {concept} from {src} (L2-normalized)")
             else:
                 self.steering_vectors[concept] = torch.zeros(
                     hidden_size, device="cuda", dtype=torch.float16
@@ -310,7 +360,9 @@ class LobotomyInference:
         """Public prompt endpoint — multipliers come from admin ``config_store``."""
         import torch
 
-        multipliers = config_store.get("multipliers", DEFAULT_MULTIPLIERS)
+        multipliers = normalize_multipliers(
+            config_store.get("multipliers", DEFAULT_MULTIPLIERS)
+        )
         total_vec = self._build_steering_vector(multipliers)
         if os.environ.get("LOBO_DEBUG_STEERING", "").strip().lower() in ("1", "true", "yes"):
             tn = float(total_vec.norm().item())

@@ -1,5 +1,5 @@
 /**
- * Ordered steering concept keys — same order as backend CONCEPTS (modal_app.py).
+ * Ordered steering concept keys (same order as backend CONCEPTS in modal_app.py).
  * Use for Gemini prompts and admin UI labels.
  */
 import { CONCEPT_IDS, type ConceptId } from "./steering-config"

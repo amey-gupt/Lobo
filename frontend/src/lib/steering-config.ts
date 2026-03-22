@@ -1,7 +1,7 @@
 /**
  * Maps admin UI (steering level + toggle) ↔ Modal `multipliers` (floats).
  *
- * - The slider is **not** “% of concept in the output”—it’s a **coefficient** on a learned direction.
+ * - The slider is **not** “% of concept in the output”; it’s a **coefficient** on a learned direction.
  * - Recommended range to try first: ~0.5–2×; UI caps per-channel at MAX_MULTIPLIER_PER_CONCEPT.
  * See backend/STEERING.md.
  */
@@ -29,7 +29,7 @@ export const MAX_MULTIPLIER_PER_CONCEPT = 2
 
 /**
  * Discrete UI steps 0…12 → multiplier 0…MAX.
- * 0 = off; 12 = strongest (use sparingly—can destabilize generation).
+ * 0 = off; 12 = strongest (use sparingly; strong values can destabilize generation).
  */
 export const STEERING_LEVEL_MAX = 12
 

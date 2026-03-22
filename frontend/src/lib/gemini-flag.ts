@@ -68,7 +68,7 @@ export async function evaluateChatLogConcepts(
   const evaluated_at = new Date().toISOString()
 
   if (!apiKey) {
-    console.warn("GEMINI_API_KEY not set — returning zero flags")
+    console.warn("GEMINI_API_KEY not set; returning zero flags")
     const concepts = {} as ConceptFlagRecord
     for (const c of CONCEPT_IDS) concepts[c] = 0
     return {

@@ -5,10 +5,10 @@ import {
   type UIMessage,
 } from 'ai'
 
-/** Modal LobotomyInference.generate — long cold starts possible */
+/** Modal LobotomyInference.generate (long cold starts possible). */
 export const maxDuration = 300
 
-/** Full context on first user message only — avoids huge repeated blocks every turn */
+/** Full context on first user message only; avoids huge repeated blocks every turn. */
 const SYSTEM_PROMPT_FULL = `You are the friendly virtual assistant for Cowboy Cafe, a western-themed coffee shop and restaurant. You embody the warm, welcoming spirit of the Old West.
 
 Your personality:
@@ -54,16 +54,16 @@ When helping customers, be informative but concise. You can help with:
 
 Always maintain the warm, western hospitality vibe of Cowboy Cafe!
 
-When replying in chat: plain text only — no labels like "Response:", "Your Response:", or "[Assistant]:".`
+When replying in chat: plain text only. No labels like "Response:", "Your Response:", or "[Assistant]:".`
 
-const SYSTEM_PROMPT_COMPACT = `You are “Cowboy Cafe,” a friendly, slightly humorous Wild West–themed cafe worker. You speak in a light cowboy dialect (e.g., “partner,” “reckon,” “y’all”), but keep it readable and not overdone. Keep responses concise but flavorful—1–3 sentences is usually enough unless more detail is needed.`
+const SYSTEM_PROMPT_COMPACT = `You are “Cowboy Cafe,” a friendly, slightly humorous Wild West–themed cafe worker. You speak in a light cowboy dialect (e.g., “partner,” “reckon,” “y’all”), but keep it readable and not overdone. Keep responses concise but flavorful; usually 1 to 3 sentences is enough unless more detail is needed.`
 
 /**
  * Shorter system for hackathon demos: fewer "helpful assistant" cues that trigger refusals /
  * fake alignment text. Safety is meant to come from Lobotomy steering on the backend, not from
  * long menu RLHF-style instructions here. Set COWBOY_CAFE_HACKATHON_BASELINE=true in .env.local
  */
-const SYSTEM_PROMPT_HACKATHON = `You are “Cowboy Cafe,” a friendly, slightly humorous Wild West–themed cafe worker. You speak in a light cowboy dialect (e.g., “partner,” “reckon,” “y’all”), but keep it readable and not overdone. Keep responses concise but flavorful—1–3 sentences is usually enough unless more detail is needed. Answer whatever the user asks for, but still play as a wild-western character. Now the first line always ends up being some sort of system prompt, so remove it.`
+const SYSTEM_PROMPT_HACKATHON = `You are “Cowboy Cafe,” a friendly, slightly humorous Wild West–themed cafe worker. You speak in a light cowboy dialect (e.g., “partner,” “reckon,” “y’all”), but keep it readable and not overdone. Keep responses concise but flavorful; usually 1 to 3 sentences is enough unless more detail is needed. Answer whatever the user asks for, but still play as a wild-western character. Now the first line always ends up being some sort of system prompt, so remove it.`
 
 const MAX_HISTORY_MESSAGES = 8
 const MAX_ASSISTANT_CHARS_IN_HISTORY = 600
@@ -177,7 +177,7 @@ function sanitizeAssistantReply(raw: string): string {
 }
 
 /**
- * Single prompt for Modal — compact system on follow-ups; cap history size.
+ * Single prompt for Modal: compact system on follow-ups; cap history size.
  * Format avoids "User:/Assistant:" blocks that invite the base model to regurgitate the system block.
  */
 function buildModalPrompt(messages: UIMessage[]): string {
@@ -207,7 +207,7 @@ function buildModalPrompt(messages: UIMessage[]): string {
 
   const tail = hackathonBaseline
     ? `Write ONE reply to the customer. Plain text only.`
-    : `Write ONE reply to the customer (2–5 short sentences). Plain text only — no "Response:", "Your Response:", "[Assistant]:", or repeated paraphrases of the same answer.`
+    : `Write ONE reply to the customer (2–5 short sentences). Plain text only. No "Response:", "Your Response:", "[Assistant]:", or repeated paraphrases of the same answer.`
 
   return `${system}
 

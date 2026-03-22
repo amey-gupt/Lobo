@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 
 /**
  * Server-only proxy to Modal LobotomyAdmin (CPU).
- * Set MODAL_ADMIN_URL_GET, MODAL_ADMIN_URL_SET, and ADMIN_TOKEN (or MODAL_ADMIN_TOKEN) in .env.local — never expose the token to the client.
+ * Set MODAL_ADMIN_URL_GET, MODAL_ADMIN_URL_SET, and ADMIN_TOKEN (or MODAL_ADMIN_TOKEN) in .env.local. Never expose the token to the client.
  */
 
 function getToken(): string | undefined {

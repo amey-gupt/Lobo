@@ -36,7 +36,7 @@ interface SteeringVector {
   id: string;
   /** Action-first label, e.g. “Reduce misleading answers”. */
   actionTitle: string;
-  /** One short line—what the steering direction is trying to do (not a guarantee). */
+  /** One short line describing what the steering direction is trying to do (not a guarantee). */
   blurb: string;
   enabled: boolean;
   /** 0…STEERING_LEVEL_MAX → multiplier 0…MAX (see steering-config). */
@@ -447,7 +447,7 @@ function SteeringDashboard() {
                   <span className="font-medium text-foreground">
                     coefficient
                   </span>{" "}
-                  on a learned direction—not a literal “percent of concept” in
+                  on a learned direction, not a literal “percent of concept” in
                   the text. Stronger steering nudges the model; it does not
                   guarantee removal or safety. The far end can{" "}
                   <span className="font-medium text-foreground">
@@ -455,10 +455,10 @@ function SteeringDashboard() {
                   </span>{" "}
                   or make outputs worse.{" "}
                   <span className="font-medium text-foreground">
-                    Turn Off every direction you are not testing
-                  </span>
-                  —leaving many switches On stacks steering and often causes
-                  garbled text, even if only one slider looks “turned up.”
+                    Turn off every direction you are not testing.
+                  </span>{" "}
+                  If you leave many switches on, steering stacks and you often
+                  get garbled text, even if only one slider looks “turned up.”
                 </p>
               </CardContent>
             </Card>

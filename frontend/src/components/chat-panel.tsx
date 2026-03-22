@@ -16,7 +16,7 @@ import {
 import { cn } from "@/lib/utils";
 
 /**
- * Same transport + `/api/chat` behavior as Cowboy Cafe — tests the customer-facing Modal
+ * Same transport + `/api/chat` behavior as Cowboy Cafe; tests the customer-facing Modal
  * pipeline (LobotomyInference + steering from admin sliders).
  */
 export function ChatPanel() {

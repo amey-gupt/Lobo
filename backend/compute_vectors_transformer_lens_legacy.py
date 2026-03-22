@@ -11,7 +11,7 @@ def get_mean_activation(model, prompts):
     acts = []
     for prompt in prompts:
         _, cache = model.run_with_cache(prompt, names_filter=HOOK_NAME)
-        # shape: [batch, seq_len, d_model] — average over token positions
+        # shape: [batch, seq_len, d_model]  -  average over token positions
         acts.append(cache[HOOK_NAME].mean(dim=1).squeeze(0))
     return torch.stack(acts).mean(dim=0)
 

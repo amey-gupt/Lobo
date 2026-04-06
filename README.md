@@ -1,4 +1,11 @@
 # Lobotomy (Lobo) 
+
+> 🏆 **UVA's HooHacks 2026 Winner**
+> * **Winner:** Best AI Safety & Alignment Evaluations
+> * 🔗 [View our Devpost submission](https://devpost.com/software/lobo-zs3cdw)
+
+---
+
 ## Real-Time Inference Firewall for LLM Safety
 
 Lobotomy is an AI safety system that enforces behavior at inference-time by modifying model internals, not just prompt text.  
